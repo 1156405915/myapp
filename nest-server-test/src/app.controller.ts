@@ -9,8 +9,8 @@ export class AppController {
   constructor(private readonly appService: AppService) {}
 
   @Get()
-  getHello(@Req() _request: Request): string {
-    console.log(_request);
+  getHello(@Req() request: Request): string {
+    console.log(request);
     return this.appService.getHello();
   }
 }

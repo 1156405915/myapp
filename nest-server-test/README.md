@@ -44,48 +44,6 @@ $ pnpm run start:dev
 $ pnpm run start:prod
 ```
 
-## Remote MySQL
-
-This project supports two ways to reach MySQL running in Docker on a remote server:
-
-1. Direct TCP access:
-   Expose the MySQL port from Docker and set `MYSQL_SSH_ENABLED=false`.
-2. SSH tunnel:
-   Keep MySQL private, connect to the server over SSH, and forward a local port to the remote Docker service such as `db:3306`.
-
-Recommended for local development against a cloud Docker host:
-
-```bash
-cp .env.example .env
-pnpm run start:dev
-curl http://localhost:3000/db/ping
-```
-
-`GET /db/ping` returns the active connection mode and the effective host/port being used by the app.
-
-### Direct mode
-
-Use direct mode when MySQL is intentionally published on the remote host.
-
-- Set `MYSQL_SSH_ENABLED=false`
-- Set `MYSQL_HOST` to the public host, for example `47.101.53.36`
-- Set `MYSQL_PORT` to the mapped host port
-- Ensure Docker publishes the MySQL port, for example `-p 3306:3306`
-- Ensure the cloud security group or firewall allows inbound traffic on that port
-- Ensure the MySQL account allows connections from your app host
-
-### SSH tunnel mode
-
-Use SSH tunnel mode when MySQL should stay inside the Docker network.
-
-- Set `MYSQL_SSH_ENABLED=true`
-- Set `MYSQL_SSH_HOST` to the remote server public IP or hostname
-- Set `MYSQL_HOST` or `MYSQL_SSH_DST_HOST` to the Docker-visible MySQL hostname, for example `db`
-- Set `MYSQL_SSH_LOCAL_PORT` to an unused local port such as `3307`
-- Configure either `MYSQL_SSH_PASSWORD` or `MYSQL_SSH_PRIVATE_KEY_PATH`
-
-In this mode, your Nest app connects to `127.0.0.1:MYSQL_SSH_LOCAL_PORT`, and the SSH tunnel forwards traffic to the remote Docker network.
-
 ## Run tests
 
 ```bash

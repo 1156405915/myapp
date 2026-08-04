@@ -1,0 +1,60 @@
+{
+  "name": "mayi-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "蚂蚁企业级 AI 协作客户端",
+  "main": "./out/main/index.js",
+  "author": "Mayi Team",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "package:win": "npm run build && electron-builder --win nsis",
+    "package:dir": "npm run build && electron-builder --dir",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "pinia": "^4.0.2",
+    "vue": "^3.5.40",
+    "vue-router": "^5.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "electron": "^43.2.0",
+    "@types/node": "^26.1.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.2",
+    "vite": "^8.1.5",
+    "vue-tsc": "^3.3.8"
+  },
+  "build": {
+    "appId": "com.mayi.agent",
+    "productName": "蚂蚁",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "蚂蚁"
+    }
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

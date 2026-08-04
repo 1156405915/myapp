@@ -31,6 +31,38 @@
 $ pnpm install
 ```
 
+## DeepSeek Agent API
+
+The `/ai/agent` API runs DeepSeek through the Anthropic-compatible endpoint
+with Claude Agent SDK. API keys stay on the server. The public Q&A agent only
+has access to `WebSearch` and `WebFetch`; shell and file tools are disabled.
+
+Configure `.env` from `.env.example`, then use:
+
+```text
+GET    /ai/agent/status
+POST   /ai/agent/test
+POST   /ai/agent/chat
+POST   /ai/agent/stream
+DELETE /ai/agent/requests/:requestId
+```
+
+JSON chat request:
+
+```json
+{
+  "message": "What is the weather in Shanghai today?",
+  "enableWebSearch": true,
+  "maxTurns": 8,
+  "sessionId": "optional-session-uuid-from-the-previous-response"
+}
+```
+
+`POST /ai/agent/stream` returns Server-Sent Events named `ready`, `session`,
+`text`, `tool_use`, `tool_result`, `tool_progress`, `complete`, and `error`.
+The `sdkReportedCostUsd` value is SDK metadata and may not match the bill from
+an Anthropic-compatible third-party provider.
+
 ## Compile and run the project
 
 ```bash

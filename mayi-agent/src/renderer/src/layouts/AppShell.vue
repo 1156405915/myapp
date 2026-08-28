@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AntLogo from '@/components/AntLogo.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useChatStore } from '@/stores/chat'
 import { useUiStore } from '@/stores/ui'
 
 interface NavigationItem {
@@ -15,8 +16,15 @@ interface NavigationItem {
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const chat = useChatStore()
 const ui = useUiStore()
 const searchOpen = ref(false)
+const searchQuery = ref('')
+const settingsOpen = ref(false)
+const settingsError = ref('')
+const settingsSuccess = ref('')
+const settingsSaving = ref(false)
+const settingsForm = reactive({ apiKey: '', model: 'deepseek-v4-pro', cwd: '' })
 
 const navigation: NavigationItem[] = [
   { label: '任务', icon: 'task', path: '/tasks' },
@@ -25,20 +33,67 @@ const navigation: NavigationItem[] = [
   { label: '文件库', icon: 'folder', path: '/files' }
 ]
 
-const recentChats = [
-  { title: '高保真块分析', date: '10-24' },
-  { title: 'MCP 接入方案', date: '昨天' },
-  { title: '文件库结构优化', date: '昨天' },
-  { title: '技能设计评审', date: '周一' },
-  { title: '任务看板整理', date: '上周五' },
-  { title: 'Agent 鉴权策略', date: '上周四' },
-  { title: '沙箱执行流程', date: '上周三' }
-]
-
 const user = computed(() => auth.user ?? { name: 'zhangsan', email: 'zhangsan@ac.com', initials: 'Z' })
+const filteredSessions = computed(() => {
+  const keyword = searchQuery.value.trim().toLocaleLowerCase()
+  if (!keyword) return chat.sessions
+  return chat.sessions.filter((session) => session.title.toLocaleLowerCase().includes(keyword))
+})
 
-function openNewChat(): void {
-  void router.push('/chat')
+onMounted(() => void chat.initialize())
+
+async function openNewChat(): Promise<void> {
+  await chat.createNewSession()
+  await router.push('/chat')
+}
+
+async function openSession(sessionId: string): Promise<void> {
+  await router.push('/chat')
+  await chat.selectSession(sessionId)
+}
+
+function formatDate(timestamp: number): string {
+  const date = new Date(timestamp)
+  const today = new Date()
+  if (date.toDateString() === today.toDateString()) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+}
+
+function openSettings(): void {
+  settingsOpen.value = true
+  ui.accountMenuOpen = false
+  settingsForm.apiKey = ''
+  settingsForm.model = chat.config?.model || 'deepseek-v4-pro'
+  settingsForm.cwd = chat.config?.cwd || ''
+  settingsError.value = ''
+  settingsSuccess.value = ''
+}
+
+async function chooseDirectory(): Promise<void> {
+  const selected = await chat.selectDirectory()
+  if (selected) settingsForm.cwd = selected
+}
+
+async function saveSettings(): Promise<void> {
+  if (!settingsForm.apiKey.trim() && !chat.config?.hasApiKey) {
+    settingsError.value = '请输入 DeepSeek API Key'
+    return
+  }
+
+  settingsSaving.value = true
+  settingsError.value = ''
+  settingsSuccess.value = ''
+  try {
+    await chat.saveConfig({ ...settingsForm })
+    settingsForm.apiKey = ''
+    settingsSuccess.value = '配置已保存'
+  } catch (error) {
+    settingsError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    settingsSaving.value = false
+  }
 }
 
 function handleLogout(): void {
@@ -72,7 +127,7 @@ function handleLogout(): void {
       <Transition name="fade-slide">
         <div v-if="searchOpen && !ui.sidebarCollapsed" class="sidebar-search">
           <UiIcon name="search" :size="17" />
-          <input aria-label="搜索会话" placeholder="搜索会话" />
+          <input v-model="searchQuery" aria-label="搜索会话" placeholder="搜索会话" />
         </div>
       </Transition>
 
@@ -98,21 +153,22 @@ function handleLogout(): void {
       <div v-if="!ui.sidebarCollapsed" class="recent-section">
         <div class="section-heading">
           <span>最近会话</span>
-          <UiIcon name="more" :size="18" />
+          <small>{{ chat.sessions.length }}</small>
         </div>
         <div class="recent-scroll">
           <button
-            v-for="chat in recentChats"
-            :key="chat.title"
+            v-for="session in filteredSessions"
+            :key="session.id"
             class="recent-item"
-            :class="{ active: route.path === '/chat' && chat.title === '高保真块分析' }"
+            :class="{ active: route.path === '/chat' && session.id === chat.activeSessionId }"
             type="button"
-            @click="openNewChat"
+            @click="openSession(session.id)"
           >
             <UiIcon name="chat" :size="16" />
-            <span class="recent-title">{{ chat.title }}</span>
-            <time>{{ chat.date }}</time>
+            <span class="recent-title">{{ session.title }}</span>
+            <time>{{ formatDate(session.updatedAt) }}</time>
           </button>
+          <p v-if="filteredSessions.length === 0" class="recent-empty">暂无会话</p>
         </div>
       </div>
 
@@ -129,7 +185,7 @@ function handleLogout(): void {
         <Transition name="account-pop">
           <div v-if="ui.accountMenuOpen && !ui.sidebarCollapsed" class="account-menu">
             <button type="button"><UiIcon name="user" />个人资料</button>
-            <button type="button"><UiIcon name="settings" />设置</button>
+            <button type="button" @click="openSettings"><UiIcon name="settings" />Agent 设置</button>
             <button type="button" @click="handleLogout"><UiIcon name="logout" />退出登录</button>
           </div>
         </Transition>
@@ -139,5 +195,50 @@ function handleLogout(): void {
     <main class="workspace">
       <RouterView />
     </main>
+
+    <Teleport to="body">
+      <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false">
+        <form class="settings-modal" @submit.prevent="saveSettings">
+        <header>
+          <div>
+            <h2>Agent 设置</h2>
+            <p>配置 DeepSeek 模型和默认工作目录</p>
+          </div>
+          <button type="button" aria-label="关闭" @click="settingsOpen = false">×</button>
+        </header>
+        <label>
+          <span>DeepSeek API Key</span>
+          <input
+            v-model="settingsForm.apiKey"
+            type="password"
+            autocomplete="off"
+            :placeholder="chat.config?.hasApiKey ? '已安全保存，留空则不修改' : '输入 DeepSeek API Key'"
+          />
+        </label>
+        <label>
+          <span>模型</span>
+          <select v-model="settingsForm.model">
+            <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+            <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+          </select>
+        </label>
+        <label>
+          <span>工作目录</span>
+          <div class="directory-field">
+            <input v-model="settingsForm.cwd" />
+            <button type="button" @click="chooseDirectory">选择</button>
+          </div>
+        </label>
+        <p v-if="settingsError" class="settings-error">{{ settingsError }}</p>
+        <p v-if="settingsSuccess" class="settings-success">{{ settingsSuccess }}</p>
+        <footer>
+          <button type="button" @click="settingsOpen = false">取消</button>
+          <button class="primary-action" type="submit" :disabled="settingsSaving">
+            {{ settingsSaving ? '保存中…' : '保存' }}
+          </button>
+        </footer>
+        </form>
+      </div>
+    </Teleport>
   </div>
 </template>

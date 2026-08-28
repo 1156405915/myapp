@@ -1,8 +1,8 @@
-import type { MayiApi } from '../../preload'
+import type { MayiApi } from '../../shared/protocol'
 
 declare global {
   interface Window {
-    mayi?: MayiApi
+    mayi: MayiApi
   }
 }
 

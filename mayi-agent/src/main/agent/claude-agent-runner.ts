@@ -1,6 +1,16 @@
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import { app } from 'electron'
 import { execFileSync } from 'node:child_process'
-import type { AgentActivity, ChatSession, TokenUsage } from '../../shared/protocol'
+import { existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import type {
+  AgentActivity,
+  ChatSession,
+  PermissionDecision,
+  PermissionRequest,
+  TokenUsage
+} from '../../shared/protocol'
 
 interface RuntimeConfig {
   apiKey: string
@@ -11,6 +21,7 @@ interface RuntimeConfig {
 interface RunCallbacks {
   onDelta(delta: string): void
   onActivity(activity: AgentActivity): void
+  onPermission(request: PermissionRequest, signal: AbortSignal): Promise<PermissionDecision>
 }
 
 export interface AgentRunResult {
@@ -20,9 +31,22 @@ export interface AgentRunResult {
   tokenUsage?: TokenUsage
 }
 
-const ENABLED_TOOLS = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'WebSearch', 'WebFetch', 'Skill']
+const ENABLED_TOOLS = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebSearch', 'WebFetch', 'Skill']
+const AUTO_ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Skill']
 const DEEPSEEK_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
+const moduleDirectory = dirname(fileURLToPath(import.meta.url))
 
+/** 解析开发态或安装包内的文档技能插件，并在资源损坏时提前终止。 */
+function getDocumentSkillsPluginPath(): string {
+  const pluginPath = app.isPackaged
+    ? join(process.resourcesPath, 'skills-plugin')
+    : resolve(moduleDirectory, '../../resources/skills-plugin')
+  const manifestPath = join(pluginPath, '.claude-plugin', 'plugin.json')
+  if (!existsSync(manifestPath)) throw new Error(`文档技能资源缺失：${manifestPath}`)
+  return pluginPath
+}
+
+/** 优先使用进程代理，并兼容读取 Windows 当前用户的系统代理。 */
 function getProxyUrl(): string | undefined {
   const environmentProxy =
     process.env.HTTPS_PROXY ||
@@ -61,6 +85,7 @@ function getProxyUrl(): string | undefined {
 export class ClaudeAgentRunner {
   private readonly controllers = new Map<string, AbortController>()
 
+  /** 启动可恢复的 Agent 流式任务，并汇总最终回复和用量。 */
   async run(
     session: ChatSession,
     prompt: string,
@@ -78,8 +103,10 @@ export class ClaudeAgentRunner {
     let finalContent = ''
     let model: string | undefined
     let tokenUsage: TokenUsage | undefined
+    // Pro 模型使用服务端长上下文别名，界面仍保留用户选择的标准名称。
     const runtimeModel = config.model === 'deepseek-v4-pro' ? 'deepseek-v4-pro[1m]' : config.model
     const proxyUrl = getProxyUrl()
+    const documentSkillsPluginPath = getDocumentSkillsPluginPath()
     try {
       const stream = query({
         prompt,
@@ -91,16 +118,64 @@ export class ClaudeAgentRunner {
           persistSession: true,
           includePartialMessages: true,
           maxTurns: 30,
-          permissionMode: 'dontAsk',
+          permissionMode: 'default',
           tools: ENABLED_TOOLS,
-          allowedTools: ENABLED_TOOLS,
-          skills: 'all',
+          allowedTools: AUTO_ALLOWED_TOOLS,
+          // 写入和命令执行必须由渲染进程弹窗授权，不能由 Agent 自行放行。
+          canUseTool: async (toolName, input, options) => {
+            const decision = await callbacks.onPermission(
+              {
+                sessionId: session.id,
+                toolUseId: options.toolUseID,
+                toolName,
+                input,
+                title: options.title,
+                displayName: options.displayName,
+                description: options.description,
+                decisionReason: options.decisionReason,
+                blockedPath: options.blockedPath,
+                canAlwaysAllow: Boolean(options.suggestions?.length)
+              },
+              options.signal
+            )
+
+            if (decision === 'deny') {
+              return {
+                behavior: 'deny',
+                message: '用户拒绝执行该工具',
+                toolUseID: options.toolUseID
+              }
+            }
+
+            return {
+              behavior: 'allow',
+              toolUseID: options.toolUseID,
+              // SDK 只有提供持久化建议时才允许记录“始终允许”。
+              ...(decision === 'allow-always' && options.suggestions?.length
+                ? { updatedPermissions: options.suggestions }
+                : {})
+            }
+          },
+          plugins: [
+            {
+              type: 'local',
+              path: documentSkillsPluginPath,
+              skipMcpDiscovery: true
+            }
+          ],
+          // 白名单与禁用 MCP 自动发现共同保证安装包只加载内置办公技能。
+          skills: ['pdf', 'docx', 'pptx', 'xlsx'],
+          // 禁止用户目录或项目目录中的 Claude 配置改变应用安全策略。
           settingSources: [],
           systemPrompt: {
             type: 'preset',
             preset: 'claude_code',
             append:
-              '你是蚂蚁企业级 AI 协作助手。默认使用中文，回答准确简洁；执行文件修改前先理解现有代码，完成后说明修改结果。'
+              '你是蚂蚁企业级 AI 协作助手。默认使用中文，回答准确简洁；执行文件修改前先理解现有代码，完成后说明修改结果。' +
+              '当任务涉及 PDF、DOCX、PPTX、XLSX、CSV 或其他办公文档时，必须先调用对应的内置 Skill，严格遵循技能中的完整工作流。' +
+              '禁止用临时简陋脚本或 HTML 打印冒充用户要求的正式文件格式。生成表格时必须设置页面可用宽度、列宽、单元格换行、分页和重复表头。' +
+              '交付前必须完成结构校验；PDF 必须逐页渲染检查，DOCX/PPTX 必须转换为 PDF 后逐页检查，XLSX 必须重算公式并确保零公式错误。' +
+              '必须检查文字裁切、越界、重叠、乱码、空白页、表格溢出和打印区域。验证失败必须修复并重新生成；缺少验证依赖时不得声称文件已完成。'
           },
           env: {
             ...process.env,
@@ -115,6 +190,7 @@ export class ClaudeAgentRunner {
             CLAUDE_CODE_EFFORT_LEVEL: 'max',
             CLAUDE_CODE_AUTO_COMPACT_WINDOW: '786432',
             CLAUDE_AGENT_SDK_CLIENT_APP: 'mayi-agent',
+            MAYI_DOCUMENT_SKILLS_ROOT: join(documentSkillsPluginPath, 'skills'),
             ...(proxyUrl
               ? {
                   HTTP_PROXY: proxyUrl,
@@ -124,11 +200,13 @@ export class ClaudeAgentRunner {
                 }
               : {})
           },
+          /** 将 SDK 子进程诊断统一标记后写入主进程日志。 */
           stderr: (data) => console.error('[DeepSeekAgent]', data)
         }
       })
 
       for await (const message of stream) {
+        // 任意流消息都可能最先携带后续恢复会话所需的 ID。
         runtimeSessionId = this.readSessionId(message) || runtimeSessionId
         this.handleStreamMessage(message, callbacks)
         if (message.type !== 'result') continue
@@ -156,16 +234,19 @@ export class ClaudeAgentRunner {
     }
   }
 
+  /** 中止指定会话当前正在执行的 SDK 请求。 */
   cancel(sessionId: string): void {
     this.controllers.get(sessionId)?.abort()
   }
 
+  /** 从不同类型的 SDK 消息中安全提取可恢复会话 ID。 */
   private readSessionId(message: SDKMessage): string | undefined {
     return 'session_id' in message && typeof message.session_id === 'string'
       ? message.session_id
       : undefined
   }
 
+  /** 将 SDK 流事件转换为界面可消费的文本增量和活动状态。 */
   private handleStreamMessage(message: SDKMessage, callbacks: RunCallbacks): void {
     if (message.type === 'system' && message.subtype === 'api_retry') {
       const retry = message as unknown as {

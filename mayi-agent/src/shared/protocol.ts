@@ -34,6 +34,7 @@ export interface PublicAppConfig {
 }
 
 export interface AppConfigPatch {
+  /** 省略或传入空字符串表示保留已经存储的密钥。 */
   apiKey?: string
   model?: string
   cwd?: string
@@ -43,6 +44,26 @@ export type AgentActivity =
   | { kind: 'thinking'; label: string }
   | { kind: 'tool'; label: string; toolName: string }
 
+export type PermissionDecision = 'deny' | 'allow-once' | 'allow-always'
+
+export interface PermissionRequest {
+  sessionId: string
+  toolUseId: string
+  toolName: string
+  input: Record<string, unknown>
+  title?: string
+  displayName?: string
+  description?: string
+  decisionReason?: string
+  blockedPath?: string
+  canAlwaysAllow: boolean
+}
+
+export interface PermissionResponseInput {
+  toolUseId: string
+  decision: PermissionDecision
+}
+
 export type ServerEvent =
   | { type: 'session.created'; payload: { session: ChatSession } }
   | { type: 'session.updated'; payload: { session: ChatSession } }
@@ -50,6 +71,8 @@ export type ServerEvent =
   | { type: 'message.created'; payload: { message: ChatMessage } }
   | { type: 'stream.delta'; payload: { sessionId: string; delta: string } }
   | { type: 'agent.activity'; payload: { sessionId: string; activity: AgentActivity } }
+  | { type: 'permission.request'; payload: { permission: PermissionRequest } }
+  | { type: 'permission.dismiss'; payload: { toolUseId: string } }
   | { type: 'run.error'; payload: { sessionId: string; message: string } }
 
 export interface StartSessionInput {
@@ -63,19 +86,38 @@ export interface SendMessageInput {
 }
 
 export interface MayiApi {
+  /** 获取应用版本。 */
   getVersion(): Promise<string>
+  /** 在隔离窗口中打开外部地址。 */
+  openExternal(url: string): Promise<void>
+  /** 写入系统剪贴板。 */
+  copyText(text: string): Promise<void>
+  permissions: {
+    /** 响应 Agent 工具权限请求。 */
+    respond(input: PermissionResponseInput): Promise<void>
+  }
   sessions: {
+    /** 获取全部会话。 */
     list(): Promise<ChatSession[]>
+    /** 创建会话并提交首条消息。 */
     create(input: StartSessionInput): Promise<ChatSession>
+    /** 获取会话消息历史。 */
     messages(sessionId: string): Promise<ChatMessage[]>
+    /** 向已有会话发送消息。 */
     send(input: SendMessageInput): Promise<void>
+    /** 取消会话执行。 */
     cancel(sessionId: string): Promise<void>
+    /** 删除会话及其消息。 */
     delete(sessionId: string): Promise<void>
   }
   config: {
+    /** 获取公开应用配置。 */
     get(): Promise<PublicAppConfig>
+    /** 保存应用配置补丁。 */
     save(patch: AppConfigPatch): Promise<PublicAppConfig>
+    /** 选择 Agent 工作目录。 */
     selectDirectory(): Promise<string | null>
   }
+  /** 订阅主进程事件并返回退订函数。 */
   onEvent(callback: (event: ServerEvent) => void): () => void
 }

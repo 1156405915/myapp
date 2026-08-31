@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "node scripts/check-document-skills.mjs && npm run typecheck && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "package:win": "npm run build && electron-builder --win nsis",
@@ -20,12 +20,15 @@
     "@anthropic-ai/claude-agent-sdk": "0.3.250",
     "@anthropic-ai/sdk": "^0.93.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "dompurify": "^3.4.14",
+    "markdown-it": "^15.0.1",
     "pinia": "^4.0.2",
     "vue": "^3.5.40",
     "vue-router": "^4.6.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.1.1",
     "@vitejs/plugin-vue": "^5.2.4",
     "electron": "^43.2.0",
@@ -44,6 +47,12 @@
     },
     "files": [
       "out/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/skills-plugin",
+        "to": "skills-plugin"
+      }
     ],
     "asarUnpack": [
       "node_modules/@anthropic-ai/claude-agent-sdk/**/*"

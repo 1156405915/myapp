@@ -5,6 +5,8 @@ import type {
   AppConfigPatch,
   ChatMessage,
   ChatSession,
+  PermissionDecision,
+  PermissionRequest,
   PublicAppConfig,
   ServerEvent
 } from '../../../shared/protocol'
@@ -16,16 +18,22 @@ export const useChatStore = defineStore('chat', () => {
   const streamingContent = ref('')
   const activity = ref<AgentActivity | null>(null)
   const config = ref<PublicAppConfig | null>(null)
+  const permissionQueue = ref<PermissionRequest[]>([])
   const error = ref('')
   const initialized = ref(false)
   let unsubscribe: (() => void) | null = null
   let initializePromise: Promise<void> | null = null
 
+  /** 解析当前选中的会话实体。 */
   const activeSession = computed(
     () => sessions.value.find((session) => session.id === activeSessionId.value) || null
   )
+  /** 标识当前会话是否正在运行 Agent。 */
   const isRunning = computed(() => activeSession.value?.status === 'running')
+  /** 只向权限弹窗暴露队列头部请求。 */
+  const pendingPermission = computed(() => permissionQueue.value[0] || null)
 
+  /** 合并并发初始化，并在读取初始数据前先订阅主进程事件。 */
   async function initialize(): Promise<void> {
     if (initialized.value) return
     if (initializePromise) return initializePromise
@@ -49,6 +57,7 @@ export const useChatStore = defineStore('chat', () => {
     return initializePromise
   }
 
+  /** 切换活动会话并加载其持久化消息。 */
   async function selectSession(sessionId: string): Promise<void> {
     activeSessionId.value = sessionId
     streamingContent.value = ''
@@ -61,6 +70,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** 根据是否已有活动会话选择创建或追加消息流程。 */
   async function send(prompt: string): Promise<void> {
     const text = prompt.trim()
     if (!text) return
@@ -81,6 +91,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** 取消当前会话并清理本地流式展示状态。 */
   async function cancel(): Promise<void> {
     if (!activeSessionId.value) return
     await window.mayi.sessions.cancel(activeSessionId.value)
@@ -88,6 +99,7 @@ export const useChatStore = defineStore('chat', () => {
     activity.value = null
   }
 
+  /** 将界面重置为尚未持久化的新会话状态。 */
   async function createNewSession(): Promise<void> {
     activeSessionId.value = null
     messages.value = []
@@ -96,18 +108,29 @@ export const useChatStore = defineStore('chat', () => {
     error.value = ''
   }
 
+  /** 请求主进程删除指定会话。 */
   async function deleteSession(sessionId: string): Promise<void> {
     await window.mayi.sessions.delete(sessionId)
   }
 
+  /** 保存配置并用主进程返回的公开配置刷新本地状态。 */
   async function saveConfig(patch: AppConfigPatch): Promise<void> {
     config.value = await window.mayi.config.save(patch)
   }
 
+  /** 打开原生目录选择器并返回选择结果。 */
   async function selectDirectory(): Promise<string | null> {
     return window.mayi.config.selectDirectory()
   }
 
+  /** 响应权限队列头部请求，等待主进程事件负责出队。 */
+  async function respondToPermission(decision: PermissionDecision): Promise<void> {
+    const permission = pendingPermission.value
+    if (!permission) return
+    await window.mayi.permissions.respond({ toolUseId: permission.toolUseId, decision })
+  }
+
+  /** 将主进程事件作为会话、消息流和权限状态的权威来源。 */
   function handleEvent(event: ServerEvent): void {
     switch (event.type) {
       case 'session.created':
@@ -129,6 +152,7 @@ export const useChatStore = defineStore('chat', () => {
         if (event.payload.message.sessionId === activeSessionId.value) {
           messages.value.push(event.payload.message)
           if (event.payload.message.role === 'assistant') {
+            // 最终持久化消息取代临时流文本，避免同一回复重复显示。
             streamingContent.value = ''
             activity.value = null
           }
@@ -142,6 +166,16 @@ export const useChatStore = defineStore('chat', () => {
       case 'agent.activity':
         if (event.payload.sessionId === activeSessionId.value) activity.value = event.payload.activity
         break
+      case 'permission.request':
+        if (!permissionQueue.value.some((item) => item.toolUseId === event.payload.permission.toolUseId)) {
+          permissionQueue.value.push(event.payload.permission)
+        }
+        break
+      case 'permission.dismiss':
+        permissionQueue.value = permissionQueue.value.filter(
+          (item) => item.toolUseId !== event.payload.toolUseId
+        )
+        break
       case 'run.error':
         if (event.payload.sessionId === activeSessionId.value) {
           error.value = event.payload.message
@@ -151,6 +185,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** 插入或更新会话，并维持最近更新优先的顺序。 */
   function upsertSession(session: ChatSession): void {
     const index = sessions.value.findIndex((item) => item.id === session.id)
     if (index >= 0) sessions.value[index] = session
@@ -158,15 +193,18 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value.sort((left, right) => right.updatedAt - left.updatedAt)
   }
 
+  /** 将未知异常归一化为可直接展示的错误文本。 */
   function setError(reason: unknown): void {
     error.value = reason instanceof Error ? reason.message : String(reason)
   }
 
+  /** 撤销 IPC 订阅并恢复可重新初始化的干净状态。 */
   function dispose(): void {
     unsubscribe?.()
     unsubscribe = null
     initializePromise = null
     initialized.value = false
+    permissionQueue.value = []
   }
 
   return {
@@ -177,6 +215,7 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent,
     activity,
     config,
+    pendingPermission,
     error,
     initialized,
     isRunning,
@@ -188,6 +227,7 @@ export const useChatStore = defineStore('chat', () => {
     deleteSession,
     saveConfig,
     selectDirectory,
+    respondToPermission,
     dispose
   }
 })

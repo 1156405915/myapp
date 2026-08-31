@@ -1,15 +1,65 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { AppConfigPatch, SendMessageInput, ServerEvent, StartSessionInput } from '../shared/protocol'
+import type {
+  AppConfigPatch,
+  PermissionResponseInput,
+  SendMessageInput,
+  ServerEvent,
+  StartSessionInput
+} from '../shared/protocol'
 import { ClaudeAgentRunner } from './agent/claude-agent-runner'
 import { SessionManager } from './session/session-manager'
 import { AppStore } from './store/app-store'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | null = null
+const browserWindows = new Set<BrowserWindow>()
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
+/** 仅接受 HTTP(S) 地址，阻止外部链接触发本地协议或脚本协议。 */
+function getExternalUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+/** 在隔离的应用内浏览器窗口中打开已验证的外部网页。 */
+function createBrowserWindow(value: string, parent: BrowserWindow | null = mainWindow): void {
+  const externalUrl = getExternalUrl(value)
+  if (!externalUrl) return
+
+  const browserWindow = new BrowserWindow({
+    width: 1180,
+    height: 780,
+    minWidth: 720,
+    minHeight: 520,
+    parent: parent && !parent.isDestroyed() ? parent : undefined,
+    show: false,
+    autoHideMenuBar: true,
+    title: '蚂蚁浏览器',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  })
+
+  browserWindows.add(browserWindow)
+  browserWindow.once('ready-to-show', () => browserWindow.show())
+  // 子页面的新窗口请求继续进入隔离浏览器，原始导航始终被拒绝。
+  browserWindow.webContents.setWindowOpenHandler(({ url }) => {
+    createBrowserWindow(url, browserWindow)
+    return { action: 'deny' }
+  })
+  browserWindow.on('closed', () => browserWindows.delete(browserWindow))
+  void browserWindow.loadURL(externalUrl)
+}
+
+/** 创建承载可信渲染页面的主窗口。 */
 const createWindow = (): BrowserWindow => {
   const window = new BrowserWindow({
     width: 1440,
@@ -29,9 +79,15 @@ const createWindow = (): BrowserWindow => {
   })
 
   window.once('ready-to-show', () => window.show())
+  // 主页面不得直接承载外部网页，新窗口请求统一转交沙箱浏览器。
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)
+    createBrowserWindow(url, window)
     return { action: 'deny' }
+  })
+  // 阻止主渲染器离开应用入口，避免外部页面获得预加载桥接能力。
+  window.webContents.on('will-navigate', (event, url) => {
+    event.preventDefault()
+    createBrowserWindow(url, window)
   })
 
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
@@ -46,50 +102,80 @@ const createWindow = (): BrowserWindow => {
   return window
 }
 
+/** 确保特权 IPC 只能由唯一的可信主窗口调用。 */
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
   if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
     throw new Error('拒绝来自未知窗口的 IPC 请求')
   }
 }
 
+/** 注册经过发送方校验和输入校验的主进程 IPC 能力。 */
 function registerIpc(store: AppStore, sessions: SessionManager): void {
+  /** 返回应用版本，不向渲染进程暴露 Electron 对象。 */
   ipcMain.handle('app:version', (event) => {
     assertTrustedSender(event)
     return app.getVersion()
   })
+  /** 验证地址后在隔离窗口中打开外部链接。 */
+  ipcMain.handle('shell:open-external', (event, url: string) => {
+    assertTrustedSender(event)
+    const externalUrl = getExternalUrl(url)
+    if (!externalUrl) throw new Error('不支持的外部链接')
+    createBrowserWindow(externalUrl)
+  })
+  /** 在 1 MB 资源上限内写入系统剪贴板。 */
+  ipcMain.handle('clipboard:write-text', (event, text: string) => {
+    assertTrustedSender(event)
+    if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('复制内容无效')
+    clipboard.writeText(text)
+  })
+  /** 将用户权限决策交给待决 Agent 请求。 */
+  ipcMain.handle('permissions:respond', (event, input: PermissionResponseInput) => {
+    assertTrustedSender(event)
+    sessions.handlePermissionResponse(input)
+  })
+  /** 读取全部持久化会话。 */
   ipcMain.handle('sessions:list', (event) => {
     assertTrustedSender(event)
     return sessions.listSessions()
   })
+  /** 创建会话并提交首条提示。 */
   ipcMain.handle('sessions:create', (event, input: StartSessionInput) => {
     assertTrustedSender(event)
     return sessions.createSession(input?.prompt, input?.title)
   })
+  /** 读取指定会话的消息历史。 */
   ipcMain.handle('sessions:messages', (event, sessionId: string) => {
     assertTrustedSender(event)
     return sessions.getMessages(sessionId)
   })
+  /** 向已有会话追加提示。 */
   ipcMain.handle('sessions:send', (event, input: SendMessageInput) => {
     assertTrustedSender(event)
     sessions.sendMessage(input?.sessionId, input?.prompt)
   })
+  /** 取消会话的当前任务和排队任务。 */
   ipcMain.handle('sessions:cancel', (event, sessionId: string) => {
     assertTrustedSender(event)
     sessions.cancel(sessionId)
   })
+  /** 删除会话及其消息。 */
   ipcMain.handle('sessions:delete', (event, sessionId: string) => {
     assertTrustedSender(event)
     sessions.deleteSession(sessionId)
   })
+  /** 返回不包含明文密钥的公开配置。 */
   ipcMain.handle('config:get', (event) => {
     assertTrustedSender(event)
     return store.getPublicConfig()
   })
+  /** 校验并持久化允许修改的应用配置。 */
   ipcMain.handle('config:save', (event, patch: AppConfigPatch) => {
     assertTrustedSender(event)
     if (!patch || typeof patch !== 'object') throw new Error('配置格式无效')
     return store.updateConfig(patch)
   })
+  /** 使用原生目录选择器获取 Agent 工作目录。 */
   ipcMain.handle('config:select-directory', async (event) => {
     assertTrustedSender(event)
     if (!mainWindow) return null
@@ -104,6 +190,7 @@ function registerIpc(store: AppStore, sessions: SessionManager): void {
 if (!hasSingleInstanceLock) {
   app.quit()
 } else {
+  // 第二次启动仅激活已有主窗口，避免重复注册 IPC 和会话运行器。
   app.on('second-instance', () => {
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
@@ -111,21 +198,25 @@ if (!hasSingleInstanceLock) {
     mainWindow.focus()
   })
 
+  // 主窗口身份建立后再注册依赖发送方校验的 IPC。
   app.whenReady().then(() => {
     mainWindow = createWindow()
     const store = new AppStore()
     const runner = new ClaudeAgentRunner()
+    /** 将会话管理器事件单向转发给可信渲染进程。 */
     const sessions = new SessionManager(store, runner, (event: ServerEvent) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event)
     })
     registerIpc(store, sessions)
 
+    /** macOS 从 Dock 激活且无窗口时重建主窗口。 */
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow()
     })
   })
 }
 
+/** 非 macOS 平台关闭所有窗口即退出应用。 */
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })

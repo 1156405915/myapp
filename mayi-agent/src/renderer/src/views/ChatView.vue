@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { useChatStore } from '@/stores/chat'
 
 const chat = useChatStore()
 const message = ref('')
 const sending = ref(false)
+const copiedMessageId = ref<string | null>(null)
 const messageList = ref<HTMLElement | null>(null)
 const skills = [
   { icon: 'file', title: '文档总结', description: '快速提炼重点' },
@@ -18,8 +20,10 @@ const skills = [
   { icon: 'translate', title: '翻译润色', description: '翻译与润色优化' }
 ]
 
+// ChatView 可能晚于布局挂载，store 会避免重复初始化和重复监听。
 onMounted(() => void chat.initialize())
 
+// 仅观察影响列表高度的数据，并等待 DOM 更新后再滚动。
 watch(
   () => [chat.messages.length, chat.streamingContent],
   async () => {
@@ -28,10 +32,12 @@ watch(
   }
 )
 
+/** 将快捷技能名称预填入输入框，保留用户继续补充需求的空间。 */
 function useSkill(title: string): void {
   message.value = `请帮我使用“${title}”技能：`
 }
 
+/** 防止 IPC 提交阶段重复发送，并在成功提交后清空输入。 */
 async function submit(): Promise<void> {
   const prompt = message.value.trim()
   if (!prompt || sending.value) return
@@ -44,6 +50,7 @@ async function submit(): Promise<void> {
   }
 }
 
+/** 支持 Enter 发送，同时避免中文输入法确认候选时误提交。 */
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
     event.preventDefault()
@@ -51,9 +58,24 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
-function formatTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+/** 将消息时间格式化为当天时间或月日时间。 */
+function formatMessageTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  const today = new Date()
+  const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  if (date.toDateString() === today.toDateString()) return `今天 ${time}`
+  return `${date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })} ${time}`
 }
+
+/** 复制消息，并避免旧定时器清除后来触发的复制反馈。 */
+async function copyMessage(id: string, content: string): Promise<void> {
+  await window.mayi.copyText(content)
+  copiedMessageId.value = id
+  window.setTimeout(() => {
+    if (copiedMessageId.value === id) copiedMessageId.value = null
+  }, 1600)
+}
+
 </script>
 
 <template>
@@ -79,20 +101,28 @@ function formatTime(timestamp: number): string {
       </header>
 
       <article v-for="item in chat.messages" :key="item.id" class="message-row" :class="item.role">
-        <div class="message-avatar">{{ item.role === 'user' ? '你' : '蚁' }}</div>
-        <div class="message-body" :class="{ error: item.isError }">
-          <div class="message-meta"><strong>{{ item.role === 'user' ? '你' : '蚂蚁' }}</strong><time>{{ formatTime(item.createdAt) }}</time></div>
-          <p>{{ item.content }}</p>
-          <small v-if="item.tokenUsage" class="token-usage">{{ item.model || 'Claude' }} · {{ item.tokenUsage.input + item.tokenUsage.output }} tokens<span v-if="item.tokenUsage.costUsd !== undefined"> · ${{ item.tokenUsage.costUsd.toFixed(4) }}</span></small>
+        <div class="message-stack">
+          <div class="message-body" :class="{ error: item.isError }">
+            <p v-if="item.role === 'user'" class="user-message-text">{{ item.content }}</p>
+            <MarkdownContent v-else :content="item.content" />
+            <small v-if="item.tokenUsage" class="token-usage">{{ item.model || 'Claude' }} · {{ item.tokenUsage.input + item.tokenUsage.output }} tokens<span v-if="item.tokenUsage.costUsd !== undefined"> · ${{ item.tokenUsage.costUsd.toFixed(4) }}</span></small>
+          </div>
+          <div class="message-actions">
+            <time :datetime="new Date(item.createdAt).toISOString()">{{ formatMessageTime(item.createdAt) }}</time>
+            <button type="button" :aria-label="copiedMessageId === item.id ? '已复制' : '复制消息'" :title="copiedMessageId === item.id ? '已复制' : '复制消息'" @click="copyMessage(item.id, item.content)">
+              <UiIcon :name="copiedMessageId === item.id ? 'check' : 'copy'" :size="15" />
+            </button>
+          </div>
         </div>
       </article>
 
       <article v-if="chat.streamingContent || chat.activity" class="message-row assistant streaming">
-        <div class="message-avatar">蚁</div>
-        <div class="message-body">
-          <div class="message-meta"><strong>蚂蚁</strong><span class="typing-dots"><i></i><i></i><i></i></span></div>
-          <p v-if="chat.streamingContent">{{ chat.streamingContent }}</p>
-          <div v-if="chat.activity" class="agent-activity"><UiIcon :name="chat.activity.kind === 'tool' ? 'cube' : 'spark'" :size="16" />{{ chat.activity.label }}</div>
+        <div class="message-stack">
+          <div class="message-body">
+            <MarkdownContent v-if="chat.streamingContent" :content="chat.streamingContent" streaming />
+            <span v-else class="typing-dots" aria-label="蚂蚁正在回复"><i></i><i></i><i></i></span>
+            <div v-if="chat.activity" class="agent-activity"><UiIcon :name="chat.activity.kind === 'tool' ? 'cube' : 'spark'" :size="16" />{{ chat.activity.label }}</div>
+          </div>
         </div>
       </article>
     </div>

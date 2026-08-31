@@ -6,6 +6,7 @@ const props = withDefaults(defineProps<{ name: string; size?: number; strokeWidt
   strokeWidth: 1.8
 })
 
+// SVG 片段只允许来自此静态映射，禁止将外部内容传给 v-html。
 const paths: Record<string, string> = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
@@ -40,9 +41,11 @@ const paths: Record<string, string> = {
   flow: '<rect x="9" y="2" width="6" height="5" rx="1"/><rect x="3" y="17" width="6" height="5" rx="1"/><rect x="15" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M6 17v-3h12v3"/>',
   translate: '<path d="M4 5h7M7.5 3v2M5 9c1.5 3 4 5 7 6M10 9c-.7 2.5-2.3 4.5-5 6M14 20l4-10 4 10M15.5 16h5"/>',
   note: '<path d="M5 3h14v18H5zM8 8h8M8 12h8M8 16h5"/>',
-  close: '<path d="m6 6 12 12M18 6 6 18"/>'
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'
 }
 
+/** 解析内置图标，并为未知名称提供稳定回退。 */
 const markup = computed(() => paths[props.name] ?? paths.more)
 </script>
 

@@ -2,7 +2,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AntLogo from '@/components/AntLogo.vue'
+import PermissionDialog from '@/components/PermissionDialog.vue'
 import UiIcon from '@/components/UiIcon.vue'
+import type { PermissionDecision } from '../../../shared/protocol'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useUiStore } from '@/stores/ui'
@@ -24,6 +26,7 @@ const settingsOpen = ref(false)
 const settingsError = ref('')
 const settingsSuccess = ref('')
 const settingsSaving = ref(false)
+const permissionResponding = ref(false)
 const settingsForm = reactive({ apiKey: '', model: 'deepseek-v4-pro', cwd: '' })
 
 const navigation: NavigationItem[] = [
@@ -33,25 +36,31 @@ const navigation: NavigationItem[] = [
   { label: '文件库', icon: 'folder', path: '/files' }
 ]
 
+/** 返回当前登录用户或离线展示占位用户。 */
 const user = computed(() => auth.user ?? { name: 'zhangsan', email: 'zhangsan@ac.com', initials: 'Z' })
+/** 按标题筛选侧边栏会话，同时保留 store 的时间排序。 */
 const filteredSessions = computed(() => {
   const keyword = searchQuery.value.trim().toLocaleLowerCase()
   if (!keyword) return chat.sessions
   return chat.sessions.filter((session) => session.title.toLocaleLowerCase().includes(keyword))
 })
 
+// 布局和聊天页可能同时挂载，store 会合并并发初始化请求。
 onMounted(() => void chat.initialize())
 
+/** 清空当前会话状态并进入聊天页。 */
 async function openNewChat(): Promise<void> {
   await chat.createNewSession()
   await router.push('/chat')
 }
 
+/** 进入聊天页并加载选定会话。 */
 async function openSession(sessionId: string): Promise<void> {
   await router.push('/chat')
   await chat.selectSession(sessionId)
 }
 
+/** 将会话时间压缩为适合侧边栏的当天时间或月日。 */
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp)
   const today = new Date()
@@ -61,6 +70,7 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
 
+/** 使用公开配置填充设置表单，但不从主进程回填明文密钥。 */
 function openSettings(): void {
   settingsOpen.value = true
   ui.accountMenuOpen = false
@@ -71,11 +81,13 @@ function openSettings(): void {
   settingsSuccess.value = ''
 }
 
+/** 通过原生选择器更新待保存的工作目录。 */
 async function chooseDirectory(): Promise<void> {
   const selected = await chat.selectDirectory()
   if (selected) settingsForm.cwd = selected
 }
 
+/** 校验并保存设置；空密钥不会覆盖已存密钥。 */
 async function saveSettings(): Promise<void> {
   if (!settingsForm.apiKey.trim() && !chat.config?.hasApiKey) {
     settingsError.value = '请输入 DeepSeek API Key'
@@ -96,6 +108,17 @@ async function saveSettings(): Promise<void> {
   }
 }
 
+/** 提交权限决策，并在主进程确认前阻止重复响应。 */
+async function respondToPermission(decision: PermissionDecision): Promise<void> {
+  permissionResponding.value = true
+  try {
+    await chat.respondToPermission(decision)
+  } finally {
+    permissionResponding.value = false
+  }
+}
+
+/** 清理本地登录态并返回登录页。 */
 function handleLogout(): void {
   auth.logout()
   ui.accountMenuOpen = false
@@ -197,6 +220,12 @@ function handleLogout(): void {
     </main>
 
     <Teleport to="body">
+      <PermissionDialog
+        v-if="chat.pendingPermission"
+        :permission="chat.pendingPermission"
+        :busy="permissionResponding"
+        @respond="respondToPermission"
+      />
       <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false">
         <form class="settings-modal" @submit.prevent="saveSettings">
         <header>

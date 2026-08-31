@@ -3,6 +3,7 @@ import { nextTick, onMounted, ref, watch } from 'vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { useChatStore } from '@/stores/chat'
+import type { ChatMessage, ContentBlock } from '../../../shared/protocol'
 
 const chat = useChatStore()
 const message = ref('')
@@ -76,6 +77,37 @@ async function copyMessage(id: string, content: string): Promise<void> {
   }, 1600)
 }
 
+/** 将消息中的结构化块转换为适合复制的纯文本。 */
+function messageText(item: ChatMessage): string {
+  return item.blocks
+    .map((block) => {
+      if (block.type === 'text') return block.text
+      if (block.type === 'thinking') return block.thinking
+      if (block.type === 'tool_use') return `${block.toolName}\n${JSON.stringify(block.input, null, 2)}`
+      if (block.type === 'tool_result') return block.content
+      return block.message
+    })
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/** 格式化工具输入，避免模板中重复处理异常 JSON 值。 */
+function formatToolInput(block: Extract<ContentBlock, { type: 'tool_use' }>): string {
+  return JSON.stringify(block.input, null, 2)
+}
+
+/** 将毫秒耗时格式化为紧凑的秒或分钟文本。 */
+function formatDuration(durationMs: number): string {
+  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)} 秒`
+  return `${Math.floor(durationMs / 60_000)} 分 ${Math.round((durationMs % 60_000) / 1000)} 秒`
+}
+
+/** 计算并限制上下文窗口百分比，避免异常数据撑破进度条。 */
+function contextPercentage(item: ChatMessage): number {
+  if (!item.contextUsage?.maxTokens) return 0
+  return Math.min(100, Math.round((item.contextUsage.usedTokens / item.contextUsage.maxTokens) * 100))
+}
+
 </script>
 
 <template>
@@ -103,13 +135,36 @@ async function copyMessage(id: string, content: string): Promise<void> {
       <article v-for="item in chat.messages" :key="item.id" class="message-row" :class="item.role">
         <div class="message-stack">
           <div class="message-body" :class="{ error: item.isError }">
-            <p v-if="item.role === 'user'" class="user-message-text">{{ item.content }}</p>
-            <MarkdownContent v-else :content="item.content" />
-            <small v-if="item.tokenUsage" class="token-usage">{{ item.model || 'Claude' }} · {{ item.tokenUsage.input + item.tokenUsage.output }} tokens<span v-if="item.tokenUsage.costUsd !== undefined"> · ${{ item.tokenUsage.costUsd.toFixed(4) }}</span></small>
+            <template v-for="(block, blockIndex) in item.blocks" :key="`${item.id}-${blockIndex}`">
+              <p v-if="item.role === 'user' && block.type === 'text'" class="user-message-text">{{ block.text }}</p>
+              <MarkdownContent v-else-if="block.type === 'text'" :content="block.text" />
+              <details v-else-if="block.type === 'thinking'" class="trace-block thinking-block">
+                <summary><UiIcon name="spark" :size="15" />Thinking</summary>
+                <p>{{ block.thinking }}</p>
+              </details>
+              <details v-else-if="block.type === 'tool_use'" class="trace-block tool-use-block">
+                <summary><UiIcon name="cube" :size="15" />调用 {{ block.toolName }}</summary>
+                <pre>{{ formatToolInput(block) }}</pre>
+              </details>
+              <details v-else-if="block.type === 'tool_result'" class="trace-block tool-result-block" :class="{ failed: block.isError }">
+                <summary><UiIcon name="check" :size="15" />工具结果</summary>
+                <pre>{{ block.content }}</pre>
+              </details>
+              <p v-else-if="block.type === 'error'" class="structured-error">{{ block.message }}</p>
+            </template>
+            <div v-if="item.contextUsage" class="context-usage">
+              <span>上下文 {{ item.contextUsage.usedTokens.toLocaleString() }} / {{ item.contextUsage.maxTokens.toLocaleString() }} tokens</span>
+              <i><b :style="{ width: `${contextPercentage(item)}%` }"></b></i>
+            </div>
+            <small v-if="item.tokenUsage || item.durationMs" class="token-usage">
+              {{ item.model || 'Agent' }}
+              <template v-if="item.tokenUsage"> · {{ item.tokenUsage.input + item.tokenUsage.output }} tokens<span v-if="item.tokenUsage.costUsd !== undefined"> · ${{ item.tokenUsage.costUsd.toFixed(4) }}</span></template>
+              <template v-if="item.durationMs"> · {{ formatDuration(item.durationMs) }}</template>
+            </small>
           </div>
           <div class="message-actions">
             <time :datetime="new Date(item.createdAt).toISOString()">{{ formatMessageTime(item.createdAt) }}</time>
-            <button type="button" :aria-label="copiedMessageId === item.id ? '已复制' : '复制消息'" :title="copiedMessageId === item.id ? '已复制' : '复制消息'" @click="copyMessage(item.id, item.content)">
+            <button type="button" :aria-label="copiedMessageId === item.id ? '已复制' : '复制消息'" :title="copiedMessageId === item.id ? '已复制' : '复制消息'" @click="copyMessage(item.id, messageText(item))">
               <UiIcon :name="copiedMessageId === item.id ? 'check' : 'copy'" :size="15" />
             </button>
           </div>

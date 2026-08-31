@@ -16,14 +16,28 @@ export interface TokenUsage {
   costUsd?: number
 }
 
+export interface ContextUsage {
+  usedTokens: number
+  maxTokens: number
+}
+
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
+  | { type: 'tool_use'; toolUseId: string; toolName: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
+  | { type: 'error'; message: string }
+
 export interface ChatMessage {
   id: string
   sessionId: string
   role: 'user' | 'assistant'
-  content: string
+  blocks: ContentBlock[]
   createdAt: number
   model?: string
   tokenUsage?: TokenUsage
+  contextUsage?: ContextUsage
+  durationMs?: number
   isError?: boolean
 }
 

@@ -8,6 +8,13 @@ import type {
   ServerEvent
 } from '../../shared/protocol'
 import { ClaudeAgentRunner } from '../agent/claude-agent-runner'
+import {
+  createTraceId,
+  logError,
+  logInfo,
+  logWarn,
+  runWithLogContext
+} from '../logging/logger'
 import { AppStore } from '../store/app-store'
 
 interface QueuedPrompt {
@@ -83,6 +90,7 @@ export class SessionManager {
     this.denyPendingPermissions(sessionId)
     this.runner.cancel(sessionId)
     this.updateSession({ ...session, status: 'idle', updatedAt: Date.now() })
+    logInfo('会话任务已取消', { sessionId })
   }
 
   /** 校验渲染进程提交的权限决策并结算对应请求。 */
@@ -100,6 +108,7 @@ export class SessionManager {
   deleteSession(sessionId: string): void {
     this.requireSession(sessionId)
     this.cancel(sessionId)
+    this.runner.forgetSession(sessionId)
     this.store.deleteSession(sessionId)
     this.sendEvent({ type: 'session.deleted', payload: { sessionId } })
   }
@@ -109,6 +118,7 @@ export class SessionManager {
     const queue = this.queues.get(sessionId) || []
     queue.push({ prompt })
     this.queues.set(sessionId, queue)
+    logInfo('消息已加入会话队列', { sessionId, queueLength: queue.length })
 
     if (!this.activeSessions.has(sessionId)) {
       void this.processQueue(sessionId)
@@ -145,8 +155,18 @@ export class SessionManager {
 
   /** 执行单条提示，将流事件、最终回复或错误写入会话。 */
   private async processPrompt(session: ChatSession, prompt: string): Promise<void> {
+    const traceId = createTraceId()
+    await runWithLogContext(
+      { sessionId: session.id, traceId, module: 'session' },
+      () => this.executePrompt(session, prompt)
+    )
+  }
+
+  /** 在已建立日志上下文的调用链中执行提示。 */
+  private async executePrompt(session: ChatSession, prompt: string): Promise<void> {
     try {
-      const config = this.store.getRuntimeConfig()
+      logInfo('开始处理会话提示', { promptLength: prompt.length })
+      const config = { ...this.store.getRuntimeConfig(), cwd: session.cwd }
       const result = await this.runner.run(session, prompt, config, {
         onDelta: (delta) => {
           this.sendEvent({ type: 'stream.delta', payload: { sessionId: session.id, delta } })
@@ -174,17 +194,24 @@ export class SessionManager {
         id: randomUUID(),
         sessionId: session.id,
         role: 'assistant',
-        content: result.content,
+        blocks: result.blocks,
         createdAt: Date.now(),
         model: result.model,
-        tokenUsage: result.tokenUsage
+        tokenUsage: result.tokenUsage,
+        contextUsage: result.contextUsage,
+        durationMs: result.durationMs
       }
       this.store.saveMessage(assistantMessage)
       this.sendEvent({ type: 'message.created', payload: { message: assistantMessage } })
+      logInfo('会话提示处理完成', { messageId: assistantMessage.id })
     } catch (error) {
-      if (this.cancelledSessions.has(session.id)) return
+      if (this.cancelledSessions.has(session.id)) {
+        logWarn('已忽略取消后的 Agent 结果或异常')
+        return
+      }
 
       const message = error instanceof Error ? error.message : String(error)
+      logError('会话提示处理失败', error)
       const current = this.store.getSession(session.id)
       if (current) {
         this.updateSession({ ...current, status: 'error', updatedAt: Date.now() })
@@ -194,7 +221,7 @@ export class SessionManager {
         id: randomUUID(),
         sessionId: session.id,
         role: 'assistant',
-        content: `执行失败：${message}`,
+        blocks: [{ type: 'error', message: `执行失败：${message}` }],
         createdAt: Date.now(),
         isError: true
       }
@@ -210,7 +237,7 @@ export class SessionManager {
       id: randomUUID(),
       sessionId,
       role: 'user',
-      content: prompt,
+      blocks: [{ type: 'text', text: prompt }],
       createdAt: Date.now()
     }
     this.store.saveMessage(message)
@@ -228,7 +255,10 @@ export class SessionManager {
     request: PermissionRequest,
     signal: AbortSignal
   ): Promise<PermissionDecision> {
-    if (signal.aborted) return Promise.resolve('deny')
+    if (signal.aborted) {
+      logWarn('权限请求到达时任务已经中止', { toolUseId: request.toolUseId })
+      return Promise.resolve('deny')
+    }
 
     return new Promise((resolve) => {
       const abortListener = (): void => {
@@ -236,6 +266,10 @@ export class SessionManager {
       }
       // 无响应权限在 60 秒后默认拒绝，避免 Agent 永久占用会话队列。
       const timeout = setTimeout(() => {
+        logWarn('工具权限请求超时，已默认拒绝', {
+          toolUseId: request.toolUseId,
+          toolName: request.toolName
+        })
         this.resolvePermission(request.toolUseId, 'deny')
       }, 60_000)
 
@@ -248,6 +282,7 @@ export class SessionManager {
       })
       signal.addEventListener('abort', abortListener, { once: true })
       this.sendEvent({ type: 'permission.request', payload: { permission: request } })
+      logInfo('已向用户请求工具权限', { toolUseId: request.toolUseId, toolName: request.toolName })
     })
   }
 
@@ -261,6 +296,7 @@ export class SessionManager {
     pending.signal.removeEventListener('abort', pending.abortListener)
     this.sendEvent({ type: 'permission.dismiss', payload: { toolUseId } })
     pending.resolve(decision)
+    logInfo('工具权限请求已结算', { toolUseId, decision })
     return true
   }
 

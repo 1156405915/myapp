@@ -14,6 +14,7 @@ import { AppStore } from './store/app-store'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | null = null
+let appStore: AppStore | null = null
 const browserWindows = new Set<BrowserWindow>()
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -202,6 +203,7 @@ if (!hasSingleInstanceLock) {
   app.whenReady().then(() => {
     mainWindow = createWindow()
     const store = new AppStore()
+    appStore = store
     const runner = new ClaudeAgentRunner()
     /** 将会话管理器事件单向转发给可信渲染进程。 */
     const sessions = new SessionManager(store, runner, (event: ServerEvent) => {
@@ -219,4 +221,10 @@ if (!hasSingleInstanceLock) {
 /** 非 macOS 平台关闭所有窗口即退出应用。 */
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+/** 在进程退出前同步关闭 SQLite，确保 WAL 内容完整落盘。 */
+app.on('before-quit', () => {
+  appStore?.close()
+  appStore = null
 })

@@ -7,10 +7,14 @@ import { fileURLToPath } from 'node:url'
 import type {
   AgentActivity,
   ChatSession,
+  ContentBlock,
+  ContextUsage,
   PermissionDecision,
   PermissionRequest,
   TokenUsage
 } from '../../shared/protocol'
+import { logError, logInfo, logWarn } from '../logging/logger'
+import { validateToolUse, validateWorkspaceRoot } from '../security/workspace-guard'
 
 interface RuntimeConfig {
   apiKey: string
@@ -25,14 +29,17 @@ interface RunCallbacks {
 }
 
 export interface AgentRunResult {
-  content: string
+  blocks: ContentBlock[]
   runtimeSessionId: string
   model?: string
   tokenUsage?: TokenUsage
+  contextUsage?: ContextUsage
+  durationMs?: number
 }
 
 const ENABLED_TOOLS = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebSearch', 'WebFetch', 'Skill']
-const AUTO_ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Skill']
+const AUTO_ALLOWED_TOOLS = ['WebSearch', 'WebFetch', 'Skill']
+const GUARDED_READ_TOOLS = new Set(['Read', 'Glob', 'Grep'])
 const DEEPSEEK_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
 const moduleDirectory = dirname(fileURLToPath(import.meta.url))
 
@@ -84,6 +91,7 @@ function getProxyUrl(): string | undefined {
 
 export class ClaudeAgentRunner {
   private readonly controllers = new Map<string, AbortController>()
+  private readonly sessionAllowedTools = new Map<string, Set<string>>()
 
   /** 启动可恢复的 Agent 流式任务，并汇总最终回复和用量。 */
   async run(
@@ -95,18 +103,26 @@ export class ClaudeAgentRunner {
     if (!config.apiKey) {
       throw new Error('请先在设置中配置 DeepSeek API Key')
     }
+    const workspaceValidation = validateWorkspaceRoot(config.cwd)
+    if (!workspaceValidation.allowed) {
+      throw new Error(workspaceValidation.reason || 'Agent 工作目录无效')
+    }
 
     const abortController = new AbortController()
     this.controllers.set(session.id, abortController)
 
     let runtimeSessionId = session.runtimeSessionId || ''
     let finalContent = ''
+    const blocks: ContentBlock[] = []
     let model: string | undefined
     let tokenUsage: TokenUsage | undefined
+    let contextUsage: ContextUsage | undefined
+    let durationMs: number | undefined
     // Pro 模型使用服务端长上下文别名，界面仍保留用户选择的标准名称。
     const runtimeModel = config.model === 'deepseek-v4-pro' ? 'deepseek-v4-pro[1m]' : config.model
     const proxyUrl = getProxyUrl()
     const documentSkillsPluginPath = getDocumentSkillsPluginPath()
+    logInfo('Agent 任务开始', { model: runtimeModel, cwd: config.cwd, resumed: Boolean(session.runtimeSessionId) })
     try {
       const stream = query({
         prompt,
@@ -121,23 +137,51 @@ export class ClaudeAgentRunner {
           permissionMode: 'default',
           tools: ENABLED_TOOLS,
           allowedTools: AUTO_ALLOWED_TOOLS,
-          // 写入和命令执行必须由渲染进程弹窗授权，不能由 Agent 自行放行。
+          // 所有文件工具先经过主进程路径边界，不能依赖 SDK 自动授权保证安全。
           canUseTool: async (toolName, input, options) => {
+            const toolInput = input as Record<string, unknown>
+            const security = validateToolUse(toolName, toolInput, config.cwd)
+            if (!security.allowed) {
+              logWarn('工具调用被安全策略拒绝', {
+                toolName,
+                reason: security.reason,
+                blockedPath: security.blockedPath,
+                risk: security.risk
+              })
+              return {
+                behavior: 'deny',
+                message: security.reason || '工具调用违反工作区安全策略',
+                toolUseID: options.toolUseID
+              }
+            }
+
+            if (GUARDED_READ_TOOLS.has(toolName)) {
+              logInfo('只读工具通过路径检查', { toolName })
+              return { behavior: 'allow', toolUseID: options.toolUseID }
+            }
+
+            if (this.sessionAllowedTools.get(session.id)?.has(toolName)) {
+              logInfo('工具通过本会话授权规则', { toolName })
+              return { behavior: 'allow', toolUseID: options.toolUseID }
+            }
+
             const decision = await callbacks.onPermission(
               {
                 sessionId: session.id,
                 toolUseId: options.toolUseID,
                 toolName,
-                input,
+                input: toolInput,
                 title: options.title,
                 displayName: options.displayName,
                 description: options.description,
                 decisionReason: options.decisionReason,
-                blockedPath: options.blockedPath,
+                blockedPath: security.blockedPath || options.blockedPath,
                 canAlwaysAllow: Boolean(options.suggestions?.length)
               },
               options.signal
             )
+
+            logInfo('工具权限已决策', { toolName, decision, risk: security.risk })
 
             if (decision === 'deny') {
               return {
@@ -147,13 +191,15 @@ export class ClaudeAgentRunner {
               }
             }
 
+            if (decision === 'allow-always') {
+              const allowedTools = this.sessionAllowedTools.get(session.id) || new Set<string>()
+              allowedTools.add(toolName)
+              this.sessionAllowedTools.set(session.id, allowedTools)
+            }
+
             return {
               behavior: 'allow',
-              toolUseID: options.toolUseID,
-              // SDK 只有提供持久化建议时才允许记录“始终允许”。
-              ...(decision === 'allow-always' && options.suggestions?.length
-                ? { updatedPermissions: options.suggestions }
-                : {})
+              toolUseID: options.toolUseID
             }
           },
           plugins: [
@@ -200,8 +246,8 @@ export class ClaudeAgentRunner {
                 }
               : {})
           },
-          /** 将 SDK 子进程诊断统一标记后写入主进程日志。 */
-          stderr: (data) => console.error('[DeepSeekAgent]', data)
+          /** 将 SDK 子进程诊断写入可按会话检索的持久化日志。 */
+          stderr: (data) => logWarn('Agent SDK 诊断输出', { data })
         }
       })
 
@@ -209,6 +255,7 @@ export class ClaudeAgentRunner {
         // 任意流消息都可能最先携带后续恢复会话所需的 ID。
         runtimeSessionId = this.readSessionId(message) || runtimeSessionId
         this.handleStreamMessage(message, callbacks)
+        contextUsage = this.collectContentBlocks(message, blocks) || contextUsage
         if (message.type !== 'result') continue
 
         if (message.subtype !== 'success') {
@@ -223,12 +270,19 @@ export class ClaudeAgentRunner {
           output: message.usage.output_tokens,
           costUsd: message.total_cost_usd
         }
+        durationMs = message.duration_ms
       }
 
       if (!runtimeSessionId) throw new Error('DeepSeek Agent 未返回会话 ID')
-      if (!finalContent.trim()) finalContent = '任务已完成。'
+      if (!blocks.some((block) => block.type === 'text' && block.text.trim())) {
+        blocks.push({ type: 'text', text: finalContent.trim() || '任务已完成。' })
+      }
 
-      return { content: finalContent, runtimeSessionId, model, tokenUsage }
+      logInfo('Agent 任务完成', { model, tokenUsage, durationMs })
+      return { blocks, runtimeSessionId, model, tokenUsage, contextUsage, durationMs }
+    } catch (error) {
+      logError('Agent 任务失败', error)
+      throw error
     } finally {
       this.controllers.delete(session.id)
     }
@@ -236,7 +290,14 @@ export class ClaudeAgentRunner {
 
   /** 中止指定会话当前正在执行的 SDK 请求。 */
   cancel(sessionId: string): void {
+    logInfo('正在取消 Agent 任务', { sessionId })
     this.controllers.get(sessionId)?.abort()
+  }
+
+  /** 清理已删除会话关联的执行器和持续授权状态。 */
+  forgetSession(sessionId: string): void {
+    this.cancel(sessionId)
+    this.sessionAllowedTools.delete(sessionId)
   }
 
   /** 从不同类型的 SDK 消息中安全提取可恢复会话 ID。 */
@@ -291,6 +352,57 @@ export class ClaudeAgentRunner {
     if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
       const toolName = event.content_block.name || '工具'
       callbacks.onActivity({ kind: 'tool', label: `正在执行 ${toolName}`, toolName })
+    }
+  }
+
+  /** 从完整 SDK 消息中提取可恢复的结构化内容块和上下文使用量。 */
+  private collectContentBlocks(message: SDKMessage, target: ContentBlock[]): ContextUsage | undefined {
+    if (message.type === 'assistant') {
+      for (const block of message.message.content) {
+        if (block.type === 'text' && block.text) {
+          target.push({ type: 'text', text: block.text })
+        } else if (block.type === 'thinking' && block.thinking) {
+          target.push({ type: 'thinking', thinking: block.thinking })
+        } else if (block.type === 'tool_use') {
+          target.push({
+            type: 'tool_use',
+            toolUseId: block.id,
+            toolName: block.name,
+            input:
+              block.input && typeof block.input === 'object'
+                ? (block.input as Record<string, unknown>)
+                : {}
+          })
+        }
+      }
+      return message.context_usage
+        ? {
+            usedTokens: message.context_usage.total_tokens,
+            maxTokens: message.context_usage.raw_max_tokens
+          }
+        : undefined
+    }
+
+    if (message.type !== 'user' || typeof message.message.content === 'string') return undefined
+    for (const block of message.message.content) {
+      if (block.type !== 'tool_result') continue
+      target.push({
+        type: 'tool_result',
+        toolUseId: block.tool_use_id,
+        content: this.stringifyToolResult(block.content ?? message.tool_use_result),
+        isError: block.is_error
+      })
+    }
+    return undefined
+  }
+
+  /** 将字符串或复杂工具输出转换为可持久化、可复制的稳定文本。 */
+  private stringifyToolResult(value: unknown): string {
+    if (typeof value === 'string') return value
+    try {
+      return JSON.stringify(value ?? null, null, 2)
+    } catch {
+      return String(value)
     }
   }
 }

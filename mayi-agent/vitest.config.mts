@@ -12,7 +12,8 @@ export default defineConfig({
       include: [
         'src/main/logging/logger.ts',
         'src/main/security/**/*.ts',
-        'src/main/session/session-manager.ts'
+        'src/main/session/session-manager.ts',
+        'src/main/skills/**/*.ts'
       ],
       thresholds: {
         lines: 70,

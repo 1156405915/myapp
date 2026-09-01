@@ -1,0 +1,13 @@
+{
+  "id": "docx",
+  "displayName": "Word 文档处理",
+  "category": "artifact",
+  "icon": "note",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Proprietary",
+  "requires": { "skills": [], "commands": ["python", "libreoffice"] },
+  "references": []
+}

@@ -1,9 +1,7 @@
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
-import { app } from 'electron'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import type {
   AgentActivity,
   ChatSession,
@@ -20,6 +18,8 @@ interface RuntimeConfig {
   apiKey: string
   model: string
   cwd: string
+  enabledSkillIds: string[]
+  skillsPluginPath: string
 }
 
 interface RunCallbacks {
@@ -51,17 +51,6 @@ const ENABLED_TOOLS = [
 const AUTO_ALLOWED_TOOLS = ['WebSearch', 'WebFetch', 'Skill']
 const GUARDED_READ_TOOLS = new Set(['Read', 'Glob', 'Grep'])
 const DEEPSEEK_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
-const moduleDirectory = dirname(fileURLToPath(import.meta.url))
-
-/** 解析开发态或安装包内的文档技能插件，并在资源损坏时提前终止。 */
-function getDocumentSkillsPluginPath(): string {
-  const pluginPath = app.isPackaged
-    ? join(process.resourcesPath, 'skills-plugin')
-    : resolve(moduleDirectory, '../../resources/skills-plugin')
-  const manifestPath = join(pluginPath, '.claude-plugin', 'plugin.json')
-  if (!existsSync(manifestPath)) throw new Error(`文档技能资源缺失：${manifestPath}`)
-  return pluginPath
-}
 
 /** 优先使用进程代理，并兼容读取 Windows 当前用户的系统代理。 */
 function getProxyUrl(): string | undefined {
@@ -131,7 +120,12 @@ export class ClaudeAgentRunner {
     // Pro 模型使用服务端长上下文别名，界面仍保留用户选择的标准名称。
     const runtimeModel = config.model === 'deepseek-v4-pro' ? 'deepseek-v4-pro[1m]' : config.model
     const proxyUrl = getProxyUrl()
-    const documentSkillsPluginPath = getDocumentSkillsPluginPath()
+    const documentSkillsPluginPath = config.skillsPluginPath
+    const manifestPath = join(documentSkillsPluginPath, '.claude-plugin', 'plugin.json')
+    if (!existsSync(manifestPath)) throw new Error(`文档技能资源缺失：${manifestPath}`)
+    if (!Array.isArray(config.enabledSkillIds) || config.enabledSkillIds.some((id) => typeof id !== 'string')) {
+      throw new Error('启用技能快照无效')
+    }
     logInfo('Agent 任务开始', { model: runtimeModel, cwd: config.cwd, resumed: Boolean(session.runtimeSessionId) })
     try {
       const stream = query({
@@ -221,7 +215,7 @@ export class ClaudeAgentRunner {
             }
           ],
           // 白名单与禁用 MCP 自动发现共同保证安装包只加载内置办公技能。
-          skills: ['pdf', 'docx', 'pptx', 'xlsx'],
+          skills: config.enabledSkillIds,
           // 禁止用户目录或项目目录中的 Claude 配置改变应用安全策略。
           settingSources: [],
           systemPrompt: {
@@ -230,7 +224,7 @@ export class ClaudeAgentRunner {
             append:
               '你是蚂蚁企业级 AI 协作助手。默认使用中文，回答准确简洁；执行文件修改前先理解现有代码，完成后说明修改结果。' +
               '本地文件工具和 Bash 在当前会话固定的工作区中运行，禁止访问工作区之外的路径。' +
-              '当任务涉及 PDF、DOCX、PPTX、XLSX、CSV 或其他办公文档时，必须先调用对应的内置 Skill，严格遵循技能中的完整工作流。' +
+              `本次任务可用 Skill 为：${config.enabledSkillIds.join('、') || '无'}。仅调用此列表中的 Skill，并严格遵循已调用 Skill 的完整工作流。` +
               '禁止用临时简陋脚本或 HTML 打印冒充用户要求的正式文件格式。生成表格时必须设置页面可用宽度、列宽、单元格换行、分页和重复表头。' +
               '交付前必须完成结构校验；PDF 必须逐页渲染检查，DOCX/PPTX 必须转换为 PDF 后逐页检查，XLSX 必须重算公式并确保零公式错误。' +
               '必须检查文字裁切、越界、重叠、乱码、空白页、表格溢出和打印区域。验证失败必须修复并重新生成；缺少验证依赖时不得声称文件已完成。'

@@ -1,0 +1,13 @@
+{
+  "id": "pdf",
+  "displayName": "PDF 智能处理",
+  "category": "artifact",
+  "icon": "file",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Proprietary",
+  "requires": { "skills": [], "commands": ["python", "pdftoppm"] },
+  "references": []
+}

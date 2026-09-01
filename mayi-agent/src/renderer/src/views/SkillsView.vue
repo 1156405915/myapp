@@ -1,66 +1,75 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import UiIcon from '@/components/UiIcon.vue'
+import { useSkillsStore } from '@/stores/skills'
+import type { SkillInfo } from '../../../shared/protocol'
 
-interface SkillItem {
-  icon: string
-  title: string
-  description: string
-  enabled: boolean
+const skills = useSkillsStore()
+const filter = ref('all')
+const query = ref('')
+const filters = [
+  { id: 'all', label: '全部' },
+  { id: 'artifact', label: '文件格式' },
+  { id: 'document-intelligence', label: '文档智能' }
+]
+
+const normalizedQuery = computed(() => query.value.trim().toLocaleLowerCase())
+const filteredSkills = computed(() =>
+  skills.items.filter((skill) => {
+    const matchesCategory = filter.value === 'all' || skill.category === filter.value
+    const text = `${skill.displayName} ${skill.description} ${skill.id}`.toLocaleLowerCase()
+    return matchesCategory && (!normalizedQuery.value || text.includes(normalizedQuery.value))
+  })
+)
+const recommended = computed(() => skills.items.filter((skill) => skill.recommended).slice(0, 4))
+
+function categoryLabel(category: string): string {
+  return category === 'artifact' ? '文件格式' : '文档智能'
 }
 
-const filter = ref('全部')
-const query = ref('')
-const filters = ['全部', '写作', '研发', '办公', '分析']
-const recommended = ref<SkillItem[]>([
-  { icon: 'file', title: '文档总结', description: '快速提炼文档重点', enabled: true },
-  { icon: 'code', title: '代码解释', description: '解读并解释代码', enabled: true },
-  { icon: 'web', title: '网页检索', description: '联网查找信息', enabled: true },
-  { icon: 'note', title: '会议纪要', description: '整理会议要点', enabled: true }
-])
-const allSkills = ref<SkillItem[]>([
-  { icon: 'table', title: '表格分析', description: '数据洞察与分析', enabled: true },
-  { icon: 'flow', title: '流程图', description: '生成流程图示', enabled: true },
-  { icon: 'note', title: '会议纪要', description: '整理会议要点', enabled: true },
-  { icon: 'presentation', title: '生成PPT', description: '智能生成演示文稿', enabled: false },
-  { icon: 'translate', title: '翻译润色', description: '翻译与润色优化', enabled: true },
-  { icon: 'table', title: '数据分析', description: '进行数据分析与建模', enabled: false },
-  { icon: 'file', title: '文档总结', description: '快速提炼文档重点', enabled: true },
-  { icon: 'spark', title: '灵感头脑风暴', description: '激发创意灵感', enabled: false },
-  { icon: 'folder', title: '文件解读', description: '解读文件内容', enabled: false },
-  { icon: 'code', title: '代码解释', description: '解读并解释代码', enabled: true },
-  { icon: 'web', title: '网页检索', description: '联网查找信息', enabled: true },
-  { icon: 'flow', title: '思维导图', description: '生成思维导图', enabled: false },
-  { icon: 'task', title: '任务拆解', description: '拆解任务步骤', enabled: false },
-  { icon: 'mail', title: '邮件撰写', description: '撰写专业邮件', enabled: false }
-])
+function dependencyText(skill: SkillInfo): string {
+  const missing = skill.dependencies.filter((item) => item.status === 'missing')
+  if (missing.length) return `缺少依赖：${missing.map((item) => item.label).join('、')}`
+  const commands = skill.dependencies.filter((item) => item.type === 'command')
+  return commands.length ? `运行时依赖：${commands.map((item) => item.label).join('、')}` : '无需额外依赖'
+}
+
+onMounted(() => void skills.initialize())
 </script>
 
 <template>
   <section class="page catalog-page">
     <div class="catalog-toolbar">
       <label class="search-box"><UiIcon name="search" /><input v-model="query" placeholder="搜索技能名称或描述" /></label>
-      <div class="segmented"><button v-for="item in filters" :key="item" :class="{ active: filter === item }" type="button" @click="filter = item">{{ item }}</button></div>
-      <button class="sort-button" type="button">最近使用<UiIcon name="down" :size="16" /></button>
+      <div class="segmented"><button v-for="item in filters" :key="item.id" :class="{ active: filter === item.id }" type="button" @click="filter = item.id">{{ item.label }}</button></div>
+      <div class="skill-count"><strong>{{ skills.enabledCount }}</strong><span>/ {{ skills.items.length }} 已启用</span></div>
     </div>
 
-    <div class="catalog-section-title"><strong>推荐技能</strong><small>根据你的使用习惯，为你推荐以下技能</small></div>
-    <div class="recommended-grid">
-      <article v-for="skill in recommended" :key="skill.title" class="skill-card horizontal">
-        <UiIcon :name="skill.icon" :size="34" />
-        <div><strong>{{ skill.title }}</strong><p>{{ skill.description }}</p><small>已启用</small></div>
-        <button class="switch" :class="{ on: skill.enabled }" type="button" @click="skill.enabled = !skill.enabled"><span></span></button>
-      </article>
-    </div>
+    <div v-if="skills.error" class="skills-state error-state"><span>{{ skills.error }}</span><button type="button" @click="skills.refresh">重新加载</button></div>
+    <div v-else-if="skills.loading && !skills.items.length" class="skills-state"><UiIcon name="refresh" /><span>正在读取内置技能…</span></div>
 
-    <h3 class="all-title">全部技能</h3>
-    <div class="all-skill-grid">
-      <article v-for="skill in allSkills" :key="skill.title" class="skill-card">
-        <button class="more-button" type="button"><UiIcon name="more" /></button>
+    <template v-else>
+      <div class="catalog-section-title"><strong>推荐技能</strong><small>优先启用的文档处理与质量检查能力</small></div>
+      <div class="recommended-grid">
+      <article v-for="skill in recommended" :key="skill.id" class="skill-card horizontal" :class="{ unavailable: !skill.available }">
         <UiIcon :name="skill.icon" :size="34" />
-        <strong>{{ skill.title }}</strong><p>{{ skill.description }}</p>
-        <footer><small :class="{ enabled: skill.enabled }">{{ skill.enabled ? '已启用' : '未启用' }}</small><button class="switch" :class="{ on: skill.enabled }" type="button" @click="skill.enabled = !skill.enabled"><span></span></button></footer>
+        <div><strong>{{ skill.displayName }}</strong><p>{{ skill.description }}</p><small>{{ skill.enabled ? '已启用' : skill.available ? '未启用' : '不可用' }}</small></div>
+        <button class="switch" :class="{ on: skill.enabled }" type="button" role="switch" :aria-checked="skill.enabled" :aria-label="`${skill.enabled ? '停用' : '启用'}${skill.displayName}`" :disabled="!skill.available || skills.savingIds.includes(skill.id)" @click="skills.setEnabled(skill.id, !skill.enabled)"><span></span></button>
       </article>
-    </div>
+      </div>
+
+      <h3 class="all-title">全部技能</h3>
+      <div v-if="!filteredSkills.length" class="skills-state">没有符合当前条件的技能</div>
+      <div v-else class="all-skill-grid">
+      <article v-for="skill in filteredSkills" :key="skill.id" class="skill-card" :class="{ unavailable: !skill.available }">
+        <span class="skill-version">v{{ skill.version }}</span>
+        <UiIcon :name="skill.icon" :size="34" />
+        <strong>{{ skill.displayName }}</strong><p>{{ skill.description }}</p>
+        <div class="skill-meta"><span>{{ categoryLabel(skill.category) }}</span><span>{{ skill.sourceLabel }}</span></div>
+        <div class="skill-dependency" :class="{ missing: !skill.available }">{{ dependencyText(skill) }}</div>
+        <footer><small :class="{ enabled: skill.enabled }">{{ skill.enabled ? '已启用' : skill.available ? '未启用' : '不可用' }}</small><button class="switch" :class="{ on: skill.enabled }" type="button" role="switch" :aria-checked="skill.enabled" :aria-label="`${skill.enabled ? '停用' : '启用'}${skill.displayName}`" :disabled="!skill.available || skills.savingIds.includes(skill.id)" @click="skills.setEnabled(skill.id, !skill.enabled)"><span></span></button></footer>
+      </article>
+      </div>
+    </template>
   </section>
 </template>

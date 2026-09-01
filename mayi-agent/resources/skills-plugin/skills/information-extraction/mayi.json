@@ -1,0 +1,13 @@
+{
+  "id": "information-extraction",
+  "displayName": "信息提取",
+  "category": "document-intelligence",
+  "icon": "search",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Mayi Internal",
+  "requires": { "skills": [], "commands": [] },
+  "references": []
+}

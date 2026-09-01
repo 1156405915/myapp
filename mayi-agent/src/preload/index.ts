@@ -8,6 +8,8 @@ import type {
   PublicAppConfig,
   SendMessageInput,
   ServerEvent,
+  SetSkillEnabledInput,
+  SkillInfo,
   StartSessionInput
 } from '../shared/protocol'
 
@@ -48,6 +50,13 @@ const api: MayiApi = {
       ipcRenderer.invoke('config:save', patch),
     /** 打开原生目录选择器。 */
     selectDirectory: (): Promise<string | null> => ipcRenderer.invoke('config:select-directory')
+  },
+  skills: {
+    /** 获取主进程发现的真实技能列表。 */
+    list: (): Promise<SkillInfo[]> => ipcRenderer.invoke('skills:list'),
+    /** 更新技能开关，结果以主进程返回列表为准。 */
+    setEnabled: (input: SetSkillEnabledInput): Promise<SkillInfo[]> =>
+      ipcRenderer.invoke('skills:set-enabled', input)
   },
   /** 订阅主进程事件，并返回必须在销毁时调用的退订函数。 */
   onEvent: (callback: (event: ServerEvent) => void): (() => void) => {

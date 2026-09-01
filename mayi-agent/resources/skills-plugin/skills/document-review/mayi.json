@@ -1,0 +1,13 @@
+{
+  "id": "document-review",
+  "displayName": "文档审查",
+  "category": "document-intelligence",
+  "icon": "check",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Mayi Internal",
+  "requires": { "skills": [], "commands": [] },
+  "references": []
+}

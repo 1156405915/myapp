@@ -1,0 +1,13 @@
+{
+  "id": "xlsx",
+  "displayName": "表格智能分析",
+  "category": "artifact",
+  "icon": "table",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Proprietary",
+  "requires": { "skills": [], "commands": ["python", "libreoffice"] },
+  "references": []
+}

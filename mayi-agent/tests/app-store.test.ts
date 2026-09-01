@@ -39,6 +39,22 @@ afterEach(() => {
 })
 
 describe('AppStore SQLite 持久化', () => {
+  it('持久化单个技能的用户启用状态', () => {
+    const directory = createTemporaryDirectory()
+    const store = new AppStore(directory)
+    store.setSkillEnabled('document-summary', false)
+    store.setSkillEnabled('pdf', true)
+    expect(store.listSkillStates()).toEqual({ 'document-summary': false, pdf: true })
+    store.close()
+
+    const reopened = new AppStore(directory)
+    try {
+      expect(reopened.listSkillStates()).toEqual({ 'document-summary': false, pdf: true })
+    } finally {
+      reopened.close()
+    }
+  })
+
   it('将旧版 JSON 会话和纯文本消息事务迁移为结构化内容块', () => {
     const directory = createTemporaryDirectory()
     const now = Date.now()

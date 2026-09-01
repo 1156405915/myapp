@@ -4,6 +4,7 @@ import type { ChatMessage, ChatSession, PermissionDecision, ServerEvent } from '
 import { SessionManager } from '../src/main/session/session-manager'
 import type { AppStore } from '../src/main/store/app-store'
 import type { ClaudeAgentRunner } from '../src/main/agent/claude-agent-runner'
+import type { SkillsManager } from '../src/main/skills/skills-manager'
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -73,13 +74,14 @@ function createRunner(
         },
         signal: AbortSignal
       ): Promise<PermissionDecision>
-    }
+    },
+    config: { enabledSkillIds: string[]; skillsPluginPath: string }
   ) => Promise<AgentRunResult>
 ): ClaudeAgentRunner & { cancel: ReturnType<typeof vi.fn>; forgetSession: ReturnType<typeof vi.fn> } {
   const cancel = vi.fn()
   const forgetSession = vi.fn()
   return {
-    run: vi.fn((session, prompt, _config, callbacks) => implementation(session, prompt, callbacks)),
+    run: vi.fn((session, prompt, config, callbacks) => implementation(session, prompt, callbacks, config)),
     cancel,
     forgetSession
   } as unknown as ClaudeAgentRunner & {
@@ -94,8 +96,12 @@ function createManager(store: AppStore, runner: ClaudeAgentRunner): {
   events: ServerEvent[]
 } {
   const events: ServerEvent[] = []
+  const skills = {
+    getEnabledSkillIds: vi.fn(() => ['pdf', 'document-summary']),
+    getPluginPath: vi.fn(() => 'test-skills-plugin')
+  } as unknown as SkillsManager
   return {
-    manager: new SessionManager(store, runner, (event) => events.push(event)),
+    manager: new SessionManager(store, runner, (event) => events.push(event), skills),
     events
   }
 }
@@ -115,6 +121,30 @@ afterEach(() => {
 })
 
 describe('SessionManager 会话队列', () => {
+  it('每条消息开始时使用最新技能快照', async () => {
+    const store = createStore()
+    const snapshots: string[][] = []
+    const skills = {
+      getEnabledSkillIds: vi
+        .fn()
+        .mockReturnValueOnce(['pdf'])
+        .mockReturnValueOnce(['pdf', 'document-summary']),
+      getPluginPath: vi.fn(() => 'test-skills-plugin')
+    } as unknown as SkillsManager
+    const runner = createRunner(async (_session, prompt, _callbacks, config) => {
+      snapshots.push([...config.enabledSkillIds])
+      return successfulResult(prompt)
+    })
+    const manager = new SessionManager(store, runner, () => undefined, skills)
+
+    const session = manager.createSession('第一条')
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1))
+    manager.sendMessage(session.id, '第二条')
+    await vi.waitFor(() => expect(snapshots).toHaveLength(2))
+
+    expect(snapshots).toEqual([['pdf'], ['pdf', 'document-summary']])
+  })
+
   it('同一会话严格串行执行提示', async () => {
     const store = createStore()
     const executions: Array<{ prompt: string; result: Deferred<AgentRunResult> }> = []

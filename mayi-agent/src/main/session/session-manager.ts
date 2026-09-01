@@ -16,6 +16,7 @@ import {
   runWithLogContext
 } from '../logging/logger'
 import { AppStore } from '../store/app-store'
+import type { SkillsManager } from '../skills/skills-manager'
 
 interface QueuedPrompt {
   prompt: string
@@ -39,7 +40,8 @@ export class SessionManager {
   constructor(
     private readonly store: AppStore,
     private readonly runner: ClaudeAgentRunner,
-    private readonly sendEvent: (event: ServerEvent) => void
+    private readonly sendEvent: (event: ServerEvent) => void,
+    private readonly skills: SkillsManager
   ) {}
 
   /** 返回按存储层规则排序的全部会话。 */
@@ -166,7 +168,14 @@ export class SessionManager {
   private async executePrompt(session: ChatSession, prompt: string): Promise<void> {
     try {
       logInfo('开始处理会话提示', { promptLength: prompt.length })
-      const config = { ...this.store.getRuntimeConfig(), cwd: session.cwd }
+      const enabledSkillIds = this.skills.getEnabledSkillIds()
+      const config = {
+        ...this.store.getRuntimeConfig(),
+        cwd: session.cwd,
+        enabledSkillIds,
+        skillsPluginPath: this.skills.getPluginPath()
+      }
+      logInfo('已生成 Agent 技能快照', { skillIds: enabledSkillIds })
       const result = await this.runner.run(session, prompt, config, {
         onDelta: (delta) => {
           this.sendEvent({ type: 'stream.delta', payload: { sessionId: session.id, delta } })

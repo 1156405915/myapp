@@ -66,7 +66,7 @@ interface ContentBlockRow {
   block_json: string
 }
 
-const DATABASE_VERSION = 1
+const DATABASE_VERSION = 2
 const DEEPSEEK_MODELS = new Set(['deepseek-v4-pro', 'deepseek-v4-flash'])
 
 export class AppStore {
@@ -192,6 +192,16 @@ export class AppStore {
           CREATE INDEX IF NOT EXISTS idx_blocks_message_index ON content_blocks(message_id, block_index);
           CREATE INDEX IF NOT EXISTS idx_trace_message_index ON trace_steps(message_id, step_index);
           PRAGMA user_version = 1;
+        `)
+      }
+      if (row.user_version < 2) {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS skill_states (
+            skill_id TEXT PRIMARY KEY,
+            enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+            updated_at INTEGER NOT NULL
+          );
+          PRAGMA user_version = 2;
         `)
       }
     })
@@ -355,6 +365,30 @@ export class AppStore {
       }
     })
     return this.getPublicConfig()
+  }
+
+  /** 返回用户明确覆盖过的技能启用状态。 */
+  listSkillStates(): Record<string, boolean> {
+    const rows = this.database
+      .prepare('SELECT skill_id, enabled FROM skill_states')
+      .all() as unknown as Array<{ skill_id: string; enabled: number }>
+    return Object.fromEntries(rows.map((row) => [row.skill_id, Boolean(row.enabled)]))
+  }
+
+  /** 插入或更新单个技能的用户启用状态。 */
+  setSkillEnabled(skillId: string, enabled: boolean): void {
+    if (typeof skillId !== 'string' || !skillId.trim() || typeof enabled !== 'boolean') {
+      throw new Error('技能状态无效')
+    }
+    this.database
+      .prepare(`
+        INSERT INTO skill_states(skill_id, enabled, updated_at)
+        VALUES(?, ?, ?)
+        ON CONFLICT(skill_id) DO UPDATE SET
+          enabled = excluded.enabled,
+          updated_at = excluded.updated_at
+      `)
+      .run(skillId.trim(), enabled ? 1 : 0, Date.now())
   }
 
   /** 返回最近更新优先的全部会话。 */

@@ -6,10 +6,12 @@ import type {
   PermissionResponseInput,
   SendMessageInput,
   ServerEvent,
+  SetSkillEnabledInput,
   StartSessionInput
 } from '../shared/protocol'
 import { ClaudeAgentRunner } from './agent/claude-agent-runner'
 import { SessionManager } from './session/session-manager'
+import { SkillsManager } from './skills/skills-manager'
 import { AppStore } from './store/app-store'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
@@ -111,7 +113,7 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
 }
 
 /** 注册经过发送方校验和输入校验的主进程 IPC 能力。 */
-function registerIpc(store: AppStore, sessions: SessionManager): void {
+function registerIpc(store: AppStore, sessions: SessionManager, skills: SkillsManager): void {
   /** 返回应用版本，不向渲染进程暴露 Electron 对象。 */
   ipcMain.handle('app:version', (event) => {
     assertTrustedSender(event)
@@ -186,6 +188,17 @@ function registerIpc(store: AppStore, sessions: SessionManager): void {
     })
     return result.canceled ? null : result.filePaths[0] || null
   })
+  /** 返回由主进程资源扫描和数据库状态合并的技能列表。 */
+  ipcMain.handle('skills:list', (event) => {
+    assertTrustedSender(event)
+    return skills.listSkills()
+  })
+  /** 校验并持久化内置技能启用状态。 */
+  ipcMain.handle('skills:set-enabled', (event, input: SetSkillEnabledInput) => {
+    assertTrustedSender(event)
+    if (!input || typeof input !== 'object') throw new Error('技能开关参数无效')
+    return skills.setEnabled(input.id, input.enabled)
+  })
 }
 
 if (!hasSingleInstanceLock) {
@@ -205,11 +218,17 @@ if (!hasSingleInstanceLock) {
     const store = new AppStore()
     appStore = store
     const runner = new ClaudeAgentRunner()
+    const skills = new SkillsManager(store)
     /** 将会话管理器事件单向转发给可信渲染进程。 */
-    const sessions = new SessionManager(store, runner, (event: ServerEvent) => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event)
-    })
-    registerIpc(store, sessions)
+    const sessions = new SessionManager(
+      store,
+      runner,
+      (event: ServerEvent) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event)
+      },
+      skills
+    )
+    registerIpc(store, sessions, skills)
 
     /** macOS 从 Dock 激活且无窗口时重建主窗口。 */
     app.on('activate', () => {

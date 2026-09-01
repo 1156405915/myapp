@@ -78,6 +78,38 @@ export interface PermissionResponseInput {
   decision: PermissionDecision
 }
 
+export type SkillSource = 'builtin'
+export type SkillDependencyStatus = 'available' | 'missing' | 'unknown'
+
+export interface SkillDependency {
+  id: string
+  label: string
+  type: 'skill' | 'command'
+  status: SkillDependencyStatus
+  required: boolean
+}
+
+export interface SkillInfo {
+  id: string
+  displayName: string
+  description: string
+  category: string
+  icon: string
+  version: string
+  source: SkillSource
+  sourceLabel: string
+  license: string
+  recommended: boolean
+  enabled: boolean
+  available: boolean
+  dependencies: SkillDependency[]
+}
+
+export interface SetSkillEnabledInput {
+  id: string
+  enabled: boolean
+}
+
 export type ServerEvent =
   | { type: 'session.created'; payload: { session: ChatSession } }
   | { type: 'session.updated'; payload: { session: ChatSession } }
@@ -131,6 +163,12 @@ export interface MayiApi {
     save(patch: AppConfigPatch): Promise<PublicAppConfig>
     /** 选择 Agent 工作目录。 */
     selectDirectory(): Promise<string | null>
+  }
+  skills: {
+    /** 获取 Agent 实际可发现的内置技能。 */
+    list(): Promise<SkillInfo[]>
+    /** 更新技能状态并返回最新权威列表。 */
+    setEnabled(input: SetSkillEnabledInput): Promise<SkillInfo[]>
   }
   /** 订阅主进程事件并返回退订函数。 */
   onEvent(callback: (event: ServerEvent) => void): () => void

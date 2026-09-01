@@ -1,0 +1,13 @@
+{
+  "id": "document-summary",
+  "displayName": "文档总结",
+  "category": "document-intelligence",
+  "icon": "file",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Mayi Internal",
+  "requires": { "skills": [], "commands": [] },
+  "references": []
+}

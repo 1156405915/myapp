@@ -1,0 +1,13 @@
+{
+  "id": "pptx",
+  "displayName": "演示文稿生成",
+  "category": "artifact",
+  "icon": "presentation",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": false,
+  "source": "builtin",
+  "license": "Proprietary",
+  "requires": { "skills": [], "commands": ["node", "python", "libreoffice"] },
+  "references": []
+}

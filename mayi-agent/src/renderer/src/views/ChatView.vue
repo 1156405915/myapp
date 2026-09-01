@@ -1,28 +1,27 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { useChatStore } from '@/stores/chat'
+import { useSkillsStore } from '@/stores/skills'
 import type { ChatMessage, ContentBlock } from '../../../shared/protocol'
 
 const chat = useChatStore()
+const skills = useSkillsStore()
 const message = ref('')
 const sending = ref(false)
 const copiedMessageId = ref<string | null>(null)
 const messageList = ref<HTMLElement | null>(null)
-const skills = [
-  { icon: 'file', title: '文档总结', description: '快速提炼重点' },
-  { icon: 'code', title: '代码解释', description: '解读并解释代码' },
-  { icon: 'web', title: '网页检索', description: '联网查找信息' },
-  { icon: 'presentation', title: '生成PPT', description: '智能生成演示文稿' },
-  { icon: 'table', title: '表格分析', description: '数据洞察与分析' },
-  { icon: 'flow', title: '流程图', description: '生成流程图示' },
-  { icon: 'note', title: '会议纪要', description: '整理会议要点' },
-  { icon: 'translate', title: '翻译润色', description: '翻译与润色优化' }
-]
+const skillShortcuts = computed(() => {
+  const enabled = skills.items.filter((skill) => skill.enabled && skill.available)
+  return [...enabled.filter((skill) => skill.recommended), ...enabled.filter((skill) => !skill.recommended)].slice(0, 8)
+})
 
 // ChatView 可能晚于布局挂载，store 会避免重复初始化和重复监听。
-onMounted(() => void chat.initialize())
+onMounted(() => {
+  void chat.initialize()
+  void skills.initialize()
+})
 
 // 仅观察影响列表高度的数据，并等待 DOM 更新后再滚动。
 watch(
@@ -34,8 +33,8 @@ watch(
 )
 
 /** 将快捷技能名称预填入输入框，保留用户继续补充需求的空间。 */
-function useSkill(title: string): void {
-  message.value = `请帮我使用“${title}”技能：`
+function useSkill(id: string, displayName: string): void {
+  message.value = `请使用 ${id}（${displayName}）技能帮我：`
 }
 
 /** 防止 IPC 提交阶段重复发送，并在成功提交后清空输入。 */
@@ -115,13 +114,13 @@ function contextPercentage(item: ChatMessage): number {
     <div v-if="chat.messages.length === 0 && !chat.streamingContent" class="chat-empty">
       <div class="welcome-copy">
         <h1>今天想完成什么？</h1>
-        <p>蚂蚁可以阅读项目文件、修改代码、检索资料并完成复杂任务。</p>
+        <p>蚂蚁可以阅读办公文件、整理资料、审查内容并生成专业文档。</p>
       </div>
-      <div class="skill-heading">常用技能</div>
+      <div class="skill-heading">已启用技能</div>
       <div class="skill-shortcuts">
-        <button v-for="skill in skills" :key="skill.title" type="button" @click="useSkill(skill.title)">
+        <button v-for="skill in skillShortcuts" :key="skill.id" type="button" @click="useSkill(skill.id, skill.displayName)">
           <UiIcon :name="skill.icon" :size="34" />
-          <span><strong>{{ skill.title }}</strong><small>{{ skill.description }}</small></span>
+          <span><strong>{{ skill.displayName }}</strong><small>{{ skill.description }}</small></span>
         </button>
       </div>
     </div>

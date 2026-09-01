@@ -37,7 +37,17 @@ export interface AgentRunResult {
   durationMs?: number
 }
 
-const ENABLED_TOOLS = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebSearch', 'WebFetch', 'Skill']
+const ENABLED_TOOLS = [
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'Bash',
+  'WebSearch',
+  'WebFetch',
+  'Skill'
+]
 const AUTO_ALLOWED_TOOLS = ['WebSearch', 'WebFetch', 'Skill']
 const GUARDED_READ_TOOLS = new Set(['Read', 'Glob', 'Grep'])
 const DEEPSEEK_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
@@ -137,7 +147,6 @@ export class ClaudeAgentRunner {
           permissionMode: 'default',
           tools: ENABLED_TOOLS,
           allowedTools: AUTO_ALLOWED_TOOLS,
-          // 所有文件工具先经过主进程路径边界，不能依赖 SDK 自动授权保证安全。
           canUseTool: async (toolName, input, options) => {
             const toolInput = input as Record<string, unknown>
             const security = validateToolUse(toolName, toolInput, config.cwd)
@@ -156,7 +165,7 @@ export class ClaudeAgentRunner {
             }
 
             if (GUARDED_READ_TOOLS.has(toolName)) {
-              logInfo('只读工具通过路径检查', { toolName })
+              logInfo('只读工具通过工作区路径检查', { toolName })
               return { behavior: 'allow', toolUseID: options.toolUseID }
             }
 
@@ -176,7 +185,9 @@ export class ClaudeAgentRunner {
                 description: options.description,
                 decisionReason: options.decisionReason,
                 blockedPath: security.blockedPath || options.blockedPath,
-                canAlwaysAllow: Boolean(options.suggestions?.length)
+                canAlwaysAllow:
+                  Boolean(options.suggestions?.length) ||
+                  ['Bash', 'Write', 'Edit'].includes(toolName)
               },
               options.signal
             )
@@ -218,6 +229,7 @@ export class ClaudeAgentRunner {
             preset: 'claude_code',
             append:
               '你是蚂蚁企业级 AI 协作助手。默认使用中文，回答准确简洁；执行文件修改前先理解现有代码，完成后说明修改结果。' +
+              '本地文件工具和 Bash 在当前会话固定的工作区中运行，禁止访问工作区之外的路径。' +
               '当任务涉及 PDF、DOCX、PPTX、XLSX、CSV 或其他办公文档时，必须先调用对应的内置 Skill，严格遵循技能中的完整工作流。' +
               '禁止用临时简陋脚本或 HTML 打印冒充用户要求的正式文件格式。生成表格时必须设置页面可用宽度、列宽、单元格换行、分页和重复表头。' +
               '交付前必须完成结构校验；PDF 必须逐页渲染检查，DOCX/PPTX 必须转换为 PDF 后逐页检查，XLSX 必须重算公式并确保零公式错误。' +
@@ -323,10 +335,11 @@ export class ClaudeAgentRunner {
     }
 
     if (message.type === 'tool_progress') {
+      const toolName = message.tool_name
       callbacks.onActivity({
         kind: 'tool',
-        label: `正在执行 ${message.tool_name}`,
-        toolName: message.tool_name
+        label: `正在执行 ${toolName}`,
+        toolName
       })
       return
     }

@@ -110,6 +110,22 @@ describe('工具输入安全检查', () => {
     const workspace = createTemporaryRoot('mayi-workspace-')
     expect(validateToolUse('Read', {}, workspace).allowed).toBe(false)
   })
+
+  it('只允许只读工具访问显式配置的可信资源根目录', () => {
+    const workspace = createTemporaryRoot('mayi-workspace-')
+    const resources = createTemporaryRoot('mayi-resources-')
+    const reference = join(resources, 'skills', 'reference.md')
+    mkdirSync(join(resources, 'skills'))
+    writeFileSync(reference, 'trusted')
+
+    expect(validateToolUse('Read', { file_path: reference }, workspace, [resources]).allowed).toBe(
+      true
+    )
+    expect(
+      validateToolUse('Write', { file_path: reference, content: 'changed' }, workspace, [resources])
+        .allowed
+    ).toBe(false)
+  })
 })
 
 describe('Bash 命令安全检查', () => {

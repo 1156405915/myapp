@@ -157,7 +157,9 @@ export class ClaudeAgentRunner {
           allowedTools: AUTO_ALLOWED_TOOLS,
           canUseTool: async (toolName, input, options) => {
             const toolInput = input as Record<string, unknown>
-            const security = validateToolUse(toolName, toolInput, config.cwd)
+            const security = validateToolUse(toolName, toolInput, config.cwd, [
+              documentSkillsPluginPath
+            ])
             if (!security.allowed) {
               logWarn('工具调用被安全策略拒绝', {
                 toolName,
@@ -237,7 +239,7 @@ export class ClaudeAgentRunner {
             preset: 'claude_code',
             append:
               '你是蚂蚁企业级 AI 协作助手。默认使用中文，回答准确简洁；执行文件修改前先理解现有代码，完成后说明修改结果。' +
-              '本地文件工具和 Bash 在当前会话固定的工作区中运行，禁止访问工作区之外的路径。' +
+              '本地写入和 Bash 仅限当前会话固定的工作区；只读工具还可访问应用随附的技能资源目录。' +
               `本次任务可用 Skill 为：${config.enabledSkillIds.join('、') || '无'}。仅调用此列表中的 Skill，并严格遵循已调用 Skill 的完整工作流。` +
               '禁止用临时简陋脚本或 HTML 打印冒充用户要求的正式文件格式。生成表格时必须设置页面可用宽度、列宽、单元格换行、分页和重复表头。' +
               '交付前必须完成结构校验；PDF 必须逐页渲染检查，DOCX/PPTX 必须转换为 PDF 后逐页检查，XLSX 必须重算公式并确保零公式错误。' +

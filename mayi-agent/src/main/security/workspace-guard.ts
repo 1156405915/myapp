@@ -21,6 +21,8 @@ const FILTER_FIELDS: Record<string, string[]> = {
   Grep: ['glob']
 }
 
+const READ_ONLY_FILE_TOOLS = new Set(['Read', 'Glob', 'Grep'])
+
 const HIGH_RISK_COMMANDS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\b(?:format|diskpart|bcdedit)\b/i, reason: '禁止执行磁盘或启动配置命令' },
   { pattern: /\b(?:shutdown|restart-computer|stop-computer)\b/i, reason: '禁止执行关机或重启命令' },
@@ -71,6 +73,25 @@ function findNearestExistingPath(targetPath: string): string {
     current = parent
   }
   return current
+}
+
+/** 校验只读目标位于应用显式提供的可信资源根目录内。 */
+function validateTrustedReadPath(
+  workspacePath: string,
+  requestedPath: string,
+  trustedRoot: string
+): SecurityValidation {
+  if (!trustedRoot || !existsSync(trustedRoot) || !statSync(trustedRoot).isDirectory()) {
+    return { allowed: false }
+  }
+  if (/^(?:\\\\|\/\/)/.test(requestedPath)) return { allowed: false }
+
+  const realRoot = realpathSync(resolve(trustedRoot))
+  const targetPath = resolve(workspacePath, requestedPath)
+  if (!existsSync(targetPath)) return { allowed: false }
+
+  const realTarget = realpathSync(targetPath)
+  return isWithinRoot(realRoot, realTarget) ? { allowed: true } : { allowed: false }
 }
 
 /** 拒绝驱动器根目录和操作系统关键目录作为 Agent 工作区。 */
@@ -178,7 +199,8 @@ export function validateBashCommand(workspacePath: string, command: unknown): Se
 export function validateToolUse(
   toolName: string,
   input: Record<string, unknown>,
-  workspacePath: string
+  workspacePath: string,
+  readOnlyRoots: string[] = []
 ): SecurityValidation {
   if (toolName === 'Bash') return validateBashCommand(workspacePath, input.command)
 
@@ -187,7 +209,12 @@ export function validateToolUse(
     if (value === undefined && (toolName === 'Glob' || toolName === 'Grep')) continue
     if (typeof value !== 'string') return { allowed: false, reason: `${toolName} 缺少有效路径` }
     const validation = validateWorkspacePath(workspacePath, value, toolName === 'Write')
-    if (!validation.allowed) return validation
+    if (!validation.allowed) {
+      const trustedRead = READ_ONLY_FILE_TOOLS.has(toolName) && readOnlyRoots.some((root) =>
+        validateTrustedReadPath(workspacePath, value, root).allowed
+      )
+      if (!trustedRead) return validation
+    }
   }
 
   for (const field of FILTER_FIELDS[toolName] || []) {

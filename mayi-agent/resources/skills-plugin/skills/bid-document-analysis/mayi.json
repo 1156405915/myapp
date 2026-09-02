@@ -1,0 +1,17 @@
+{
+  "id": "bid-document-analysis",
+  "displayName": "招标文件分析",
+  "description": "拆解工程招标文件、补疑和清单，形成可溯源的项目事实、评分矩阵与响应要求。",
+  "category": "bidding",
+  "icon": "search",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Mayi Internal",
+  "requires": {
+    "skills": ["information-extraction", "document-review"],
+    "commands": []
+  },
+  "references": []
+}

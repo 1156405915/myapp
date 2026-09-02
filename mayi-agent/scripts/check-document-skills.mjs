@@ -10,7 +10,8 @@ const criticalFiles = [
   'skills/docx/scripts/ooxml/scripts/validate.py',
   'skills/pptx/html2pptx.tgz',
   'skills/pptx/ooxml/scripts/validate.py',
-  'skills/xlsx/recalc.py'
+  'skills/xlsx/recalc.py',
+  'skills/hefei-qingtian-precheck/scripts/check-consistency.mjs'
 ]
 
 function fail(messages) {
@@ -33,7 +34,9 @@ if (typeof plugin.version !== 'string' || !versionPattern.test(plugin.version)) 
   errors.push('plugin.json version 无效')
 }
 
-const directories = readdirSync(skillsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory())
+const directories = readdirSync(skillsRoot, { withFileTypes: true }).filter((entry) =>
+  entry.isDirectory()
+)
 const skillIds = new Set()
 const dependencies = new Map()
 
@@ -49,11 +52,21 @@ for (const entry of directories) {
   if (!existsSync(mayiPath)) errors.push(`${entry.name} 缺少 mayi.json`)
   if (!existsSync(skillPath) || !existsSync(mayiPath)) continue
 
-  const frontmatter = readFileSync(skillPath, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---/)
-  const name = frontmatter?.[1].match(/^name:\s*([^\r\n]+)$/m)?.[1].trim().replace(/^['"]|['"]$/g, '')
+  const skillContent = readFileSync(skillPath, 'utf8')
+  const frontmatter = skillContent.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  const name = frontmatter?.[1]
+    .match(/^name:\s*([^\r\n]+)$/m)?.[1]
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
   const description = frontmatter?.[1].match(/^description:\s*([^\r\n]+)$/m)?.[1].trim()
   if (!name || !idPattern.test(name)) errors.push(`${entry.name} 的 SKILL.md name 无效`)
   if (!description) errors.push(`${entry.name} 的 SKILL.md description 不能为空`)
+  const localLinks = skillContent.matchAll(/\]\(((?:references|scripts)\/[^\s)#?]+)(?:#[^)]+)?\)/g)
+  for (const match of localLinks) {
+    if (!existsSync(join(directory, match[1]))) {
+      errors.push(`${entry.name} 引用了不存在的本地资源 ${match[1]}`)
+    }
+  }
 
   let manifest
   try {
@@ -68,15 +81,27 @@ for (const entry of directories) {
   }
   if (skillIds.has(manifest.id)) errors.push(`技能 ID 重复：${manifest.id}`)
   skillIds.add(manifest.id)
-  if (!manifest.displayName || !manifest.description || !/[\u3400-\u9fff]/u.test(manifest.description) || !manifest.category || !manifest.icon || !manifest.license) {
+  if (
+    !manifest.displayName ||
+    !manifest.description ||
+    !/[\u3400-\u9fff]/u.test(manifest.description) ||
+    !manifest.category ||
+    !manifest.icon ||
+    !manifest.license
+  ) {
     errors.push(`${entry.name} 缺少产品展示元数据`)
   }
   if (!versionPattern.test(manifest.version || '')) errors.push(`${entry.name} 的 version 无效`)
   if (manifest.source !== 'builtin') errors.push(`${entry.name} 的 source 必须为 builtin`)
   if (typeof manifest.defaultEnabled !== 'boolean') errors.push(`${entry.name} 缺少 defaultEnabled`)
   const requiredSkills = manifest.requires?.skills || []
-  if (!Array.isArray(requiredSkills) || requiredSkills.some((id) => typeof id !== 'string')) {
+  if (
+    !Array.isArray(requiredSkills) ||
+    requiredSkills.some((id) => typeof id !== 'string' || !idPattern.test(id))
+  ) {
     errors.push(`${entry.name} 的 requires.skills 无效`)
+  } else if (new Set(requiredSkills).size !== requiredSkills.length) {
+    errors.push(`${entry.name} 的 requires.skills 存在重复项`)
   } else {
     dependencies.set(manifest.id, requiredSkills)
   }
@@ -87,6 +112,30 @@ for (const [skillId, requiredSkills] of dependencies) {
     if (!skillIds.has(requiredId)) errors.push(`${skillId} 依赖不存在的技能 ${requiredId}`)
   }
 }
+
+const visited = new Set()
+const visiting = new Set()
+const dependencyPath = []
+
+// 构建前输出具体依赖环，避免无效技能图进入安装包。
+function visitDependency(skillId) {
+  if (visited.has(skillId)) return
+  if (visiting.has(skillId)) {
+    const cycleStart = dependencyPath.indexOf(skillId)
+    errors.push(`技能依赖存在循环：${[...dependencyPath.slice(cycleStart), skillId].join(' -> ')}`)
+    return
+  }
+  visiting.add(skillId)
+  dependencyPath.push(skillId)
+  for (const dependencyId of dependencies.get(skillId) || []) {
+    if (dependencies.has(dependencyId)) visitDependency(dependencyId)
+  }
+  dependencyPath.pop()
+  visiting.delete(skillId)
+  visited.add(skillId)
+}
+
+for (const skillId of dependencies.keys()) visitDependency(skillId)
 
 for (const file of criticalFiles) {
   if (!existsSync(resolve(root, file))) errors.push(`缺少关键资源 ${file}`)

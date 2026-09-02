@@ -10,7 +10,9 @@ const query = ref('')
 const filters = [
   { id: 'all', label: '全部' },
   { id: 'artifact', label: '文件格式' },
-  { id: 'document-intelligence', label: '文档智能' }
+  { id: 'document-intelligence', label: '文档智能' },
+  { id: 'bidding', label: '招标投标' },
+  { id: 'construction', label: '工程建设' }
 ]
 
 const normalizedQuery = computed(() => query.value.trim().toLocaleLowerCase())
@@ -24,12 +26,19 @@ const filteredSkills = computed(() =>
 const recommended = computed(() => skills.items.filter((skill) => skill.recommended).slice(0, 4))
 
 function categoryLabel(category: string): string {
-  return category === 'artifact' ? '文件格式' : '文档智能'
+  return ({
+    artifact: '文件格式',
+    'document-intelligence': '文档智能',
+    bidding: '招标投标',
+    construction: '工程建设'
+  }[category] || category)
 }
 
+/** 按不可用、联动启用、运行时依赖的优先级生成状态说明。 */
 function dependencyText(skill: SkillInfo): string {
   const missing = skill.dependencies.filter((item) => item.status === 'missing')
   if (missing.length) return `缺少依赖：${missing.map((item) => item.label).join('、')}`
+  if (skill.enabledBy.length) return `由 ${skill.enabledBy.join('、')} 联动启用`
   const commands = skill.dependencies.filter((item) => item.type === 'command')
   return commands.length ? `运行时依赖：${commands.map((item) => item.label).join('、')}` : '无需额外依赖'
 }

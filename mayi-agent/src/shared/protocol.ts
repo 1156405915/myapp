@@ -72,8 +72,7 @@ export interface AppConfigPatch {
 }
 
 export type AgentActivity =
-  | { kind: 'thinking'; label: string }
-  | { kind: 'tool'; label: string; toolName: string }
+  { kind: 'thinking'; label: string } | { kind: 'tool'; label: string; toolName: string }
 
 export type PermissionDecision = 'deny' | 'allow-once' | 'allow-always'
 
@@ -118,6 +117,8 @@ export interface SkillInfo {
   license: string
   recommended: boolean
   enabled: boolean
+  /** 当前技能因哪些已启用的工作流被传递启用。 */
+  enabledBy: string[]
   available: boolean
   dependencies: SkillDependency[]
 }

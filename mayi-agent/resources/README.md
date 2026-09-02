@@ -14,7 +14,7 @@
 
 ## 内置文档技能插件
 
-`skills-plugin` 是随应用发布的本地 Claude Agent SDK 插件。插件通过 `.claude-plugin/plugin.json` 声明，并由主进程显式启用以下四个技能：
+`skills-plugin` 是随应用发布的本地 Claude Agent SDK 插件。插件通过 `.claude-plugin/plugin.json` 声明，由主进程发现、校验并按用户开关与依赖关系启用十四个内置技能。
 
 | SKILL | 主要文件类型 | 核心用途 |
 | --- | --- | --- |
@@ -22,6 +22,10 @@
 | `docx` | `.docx` | 创建、读取、编辑、批注、修订、模板复用和 OOXML 校验 |
 | `pptx` | `.pptx` | 创建、读取、编辑演示文稿，处理布局、图表、备注和模板 |
 | `xlsx` | `.xlsx`、`.xlsm`、`.csv`、`.tsv` | 创建、编辑、分析表格，处理公式、格式、图表和公式重算 |
+| `document-*` 等 | 多种文档 | 总结、提取、对比、审查、专业写作、资料综合和图片分析 |
+| `bid-document-analysis` | 招标资料 | 生成可溯源的项目事实、评分矩阵和响应追踪表 |
+| `construction-organization-design` | 工程技术标 | 编制项目化、量化且图文数据一致的施工组织设计 |
+| `hefei-qingtian-precheck` | 合肥工程技术标 | 执行青天适配预审、确定性一致性检查和问题闭环 |
 
 技能目录：
 
@@ -32,7 +36,10 @@ resources/skills-plugin/
 	├─ pdf/
 	├─ docx/
 	├─ pptx/
-	└─ xlsx/
+	├─ xlsx/
+	├─ bid-document-analysis/
+	├─ construction-organization-design/
+	└─ hefei-qingtian-precheck/
 ```
 
 ### PDF SKILL
@@ -136,14 +143,14 @@ XLSX 技能用于创建、编辑和分析电子表格，并保证公式、格式
 ## 技能加载与安全边界
 
 - 主进程通过本地插件路径加载技能，不扫描用户磁盘上的任意技能目录。
-- `skills` 白名单只允许 `pdf`、`docx`、`pptx` 和 `xlsx`。
+- `skills` 白名单来自通过校验的内置技能及用户开关快照；工作流技能会传递启用其基础依赖。
 - `settingSources` 保持为空，防止用户级或项目级 Claude 配置覆盖应用安全策略。
 - 技能可以读取和分析文件；写文件、编辑文件和执行 Bash 命令仍需要用户授权。
 - 缺少生成或验证依赖时，Agent 必须明确报告缺失项，不能跳过验证后声称完成。
 
 ## 构建与打包
 
-项目根目录的 `scripts/check-document-skills.mjs` 会在构建前检查四个技能的关键文件。任一关键资源缺失都会直接终止构建。
+项目根目录的 `scripts/check-document-skills.mjs` 会在构建前检查全部技能定义、依赖图和关键资源。缺失资源、非法依赖或循环依赖会直接终止构建。
 
 electron-builder 通过 `extraResources` 将整个 `resources/skills-plugin` 复制到安装目录：
 

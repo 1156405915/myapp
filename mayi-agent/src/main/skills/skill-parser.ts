@@ -41,11 +41,14 @@ function readStringArray(value: unknown, field: string): string[] {
   return value.map((item) => item.trim())
 }
 
-/** 解析 Mayi 产品元数据并拒绝不完整或不一致的技能定义。 */
+/** 解析并校验产品元数据、目录身份及技能依赖声明。 */
 export function parseSkillDirectory(directory: string): DiscoveredSkill {
   const directoryId = basename(directory)
   const frontmatter = parseSkillFrontmatter(readFileSync(join(directory, 'SKILL.md'), 'utf8'))
-  const raw = JSON.parse(readFileSync(join(directory, 'mayi.json'), 'utf8')) as Record<string, unknown>
+  const raw = JSON.parse(readFileSync(join(directory, 'mayi.json'), 'utf8')) as Record<
+    string,
+    unknown
+  >
   const manifest: MayiSkillManifest = {
     id: typeof raw.id === 'string' ? raw.id.trim() : '',
     displayName: typeof raw.displayName === 'string' ? raw.displayName.trim() : '',
@@ -60,7 +63,10 @@ export function parseSkillDirectory(directory: string): DiscoveredSkill {
     requires:
       raw.requires && typeof raw.requires === 'object'
         ? {
-            skills: readStringArray((raw.requires as Record<string, unknown>).skills, 'requires.skills'),
+            skills: readStringArray(
+              (raw.requires as Record<string, unknown>).skills,
+              'requires.skills'
+            ),
             commands: readStringArray(
               (raw.requires as Record<string, unknown>).commands,
               'requires.commands'
@@ -104,6 +110,13 @@ export function parseSkillDirectory(directory: string): DiscoveredSkill {
   }
   if (!VERSION_PATTERN.test(manifest.version)) throw new Error('mayi.json 的 version 无效')
   if (manifest.source !== 'builtin') throw new Error('首期只允许内置技能')
+  const requiredSkills = manifest.requires?.skills || []
+  if (requiredSkills.some((id) => !SKILL_ID_PATTERN.test(id))) {
+    throw new Error('requires.skills 包含无效技能 ID')
+  }
+  if (new Set(requiredSkills).size !== requiredSkills.length) {
+    throw new Error('requires.skills 不能包含重复技能 ID')
+  }
 
   return { id: manifest.id, description: frontmatter.description, manifest }
 }

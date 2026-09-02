@@ -1,0 +1,17 @@
+{
+  "id": "hefei-qingtian-precheck",
+  "displayName": "合肥青天适配预审",
+  "description": "依据具体招标规则模拟检查施工技术标的评分覆盖、逻辑一致性、暗标和雷同风险。",
+  "category": "bidding",
+  "icon": "shield",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Mayi Internal",
+  "requires": {
+    "skills": ["construction-organization-design"],
+    "commands": ["node"]
+  },
+  "references": []
+}

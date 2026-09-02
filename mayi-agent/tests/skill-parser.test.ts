@@ -6,7 +6,7 @@ import { parseSkillDirectory, parseSkillFrontmatter } from '../src/main/skills/s
 
 const temporaryDirectories: string[] = []
 
-function createSkillDirectory(id: string, manifestId = id): string {
+function createSkillDirectory(id: string, manifestId = id, requiredSkills: string[] = []): string {
   const root = mkdtempSync(join(tmpdir(), 'mayi-skill-'))
   temporaryDirectories.push(root)
   const directory = join(root, id)
@@ -28,7 +28,7 @@ function createSkillDirectory(id: string, manifestId = id): string {
       defaultEnabled: true,
       source: 'builtin',
       license: 'Test',
-      requires: { skills: [], commands: [] },
+      requires: { skills: requiredSkills, commands: [] },
       references: []
     }),
     'utf8'
@@ -60,5 +60,11 @@ describe('Skill 解析', () => {
     expect(() => parseSkillDirectory(createSkillDirectory('demo-skill', 'other-skill'))).toThrow(
       '目录名、SKILL.md name 与 mayi.json id 必须一致'
     )
+  })
+
+  it('拒绝重复技能依赖', () => {
+    expect(() =>
+      parseSkillDirectory(createSkillDirectory('demo-skill', 'demo-skill', ['pdf', 'pdf']))
+    ).toThrow('requires.skills 不能包含重复技能 ID')
   })
 })

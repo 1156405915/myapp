@@ -1,5 +1,7 @@
-import { resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AppStore } from '../src/main/store/app-store'
 
 vi.mock('electron', () => ({
@@ -8,8 +10,57 @@ vi.mock('electron', () => ({
 
 import { SkillsManager } from '../src/main/skills/skills-manager'
 
-function createStore(): AppStore & { states: Record<string, boolean> } {
-  const states: Record<string, boolean> = {}
+const temporaryDirectories: string[] = []
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+function createPlugin(dependencies: Record<string, string[]>): string {
+  const root = mkdtempSync(join(tmpdir(), 'mayi-skills-manager-'))
+  temporaryDirectories.push(root)
+  mkdirSync(join(root, '.claude-plugin'), { recursive: true })
+  mkdirSync(join(root, 'skills'), { recursive: true })
+  writeFileSync(
+    join(root, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'test-plugin', version: '1.0.0' }),
+    'utf8'
+  )
+  for (const [id, requiredSkills] of Object.entries(dependencies)) {
+    const directory = join(root, 'skills', id)
+    mkdirSync(directory)
+    writeFileSync(
+      join(directory, 'SKILL.md'),
+      `---\nname: ${id}\ndescription: Test ${id}\n---\n\n# Test\n`,
+      'utf8'
+    )
+    writeFileSync(
+      join(directory, 'mayi.json'),
+      JSON.stringify({
+        id,
+        displayName: `测试技能 ${id}`,
+        description: `用于验证 ${id} 的中文技能说明。`,
+        category: 'test',
+        icon: 'file',
+        version: '1.0.0',
+        defaultEnabled: true,
+        source: 'builtin',
+        license: 'Test',
+        requires: { skills: requiredSkills, commands: [] },
+        references: []
+      }),
+      'utf8'
+    )
+  }
+  return root
+}
+
+function createStore(
+  initialStates: Record<string, boolean> = {}
+): AppStore & { states: Record<string, boolean> } {
+  const states: Record<string, boolean> = { ...initialStates }
   return {
     states,
     listSkillStates: () => ({ ...states }),
@@ -20,16 +71,18 @@ function createStore(): AppStore & { states: Record<string, boolean> } {
 }
 
 describe('SkillsManager', () => {
-  it('发现十一个内置技能并合并默认状态', () => {
+  it('发现十四个内置技能并合并默认状态', () => {
     const manager = new SkillsManager(createStore(), resolve('resources/skills-plugin'))
     const skills = manager.listSkills()
 
-    expect(skills).toHaveLength(11)
+    expect(skills).toHaveLength(14)
     expect(skills.map((skill) => skill.id)).toContain('document-summary')
     expect(skills.map((skill) => skill.id)).toContain('image-analysis')
     expect(skills.every((skill) => skill.source === 'builtin')).toBe(true)
     expect(skills.every((skill) => /[\u3400-\u9fff]/u.test(skill.description))).toBe(true)
-    expect(manager.getEnabledSkillIds()).toHaveLength(11)
+    expect(skills.map((skill) => skill.id)).toContain('construction-organization-design')
+    expect(skills.map((skill) => skill.id)).toContain('hefei-qingtian-precheck')
+    expect(manager.getEnabledSkillIds()).toHaveLength(14)
   })
 
   it('持久化开关并从下一次快照排除禁用技能', () => {
@@ -46,5 +99,46 @@ describe('SkillsManager', () => {
     const manager = new SkillsManager(createStore(), resolve('resources/skills-plugin'))
     expect(() => manager.setEnabled('unknown', true)).toThrow('技能不存在')
     expect(() => manager.setEnabled('pdf', 'yes' as unknown as boolean)).toThrow('技能开关参数无效')
+  })
+
+  it('启用工作流时传递启用依赖并阻止单独关闭依赖', () => {
+    const store = createStore({
+      'construction-organization-design': false,
+      'hefei-qingtian-precheck': false,
+      'bid-document-analysis': false,
+      'information-extraction': false,
+      'document-review': false,
+      'professional-writing': false,
+      docx: false,
+      pdf: false,
+      xlsx: false
+    })
+    const manager = new SkillsManager(store, resolve('resources/skills-plugin'))
+
+    const updated = manager.setEnabled('construction-organization-design', true)
+    expect(updated.find((skill) => skill.id === 'bid-document-analysis')?.enabled).toBe(true)
+    expect(updated.find((skill) => skill.id === 'information-extraction')?.enabledBy).toContain(
+      '施工组织设计'
+    )
+    expect(manager.getEnabledSkillIds()).toEqual(
+      expect.arrayContaining([
+        'construction-organization-design',
+        'bid-document-analysis',
+        'information-extraction',
+        'professional-writing',
+        'document-review',
+        'docx',
+        'pdf',
+        'xlsx'
+      ])
+    )
+    expect(() => manager.setEnabled('bid-document-analysis', false)).toThrow('请先停用这些工作流')
+  })
+
+  it('拒绝循环技能依赖', () => {
+    const pluginPath = createPlugin({ 'skill-a': ['skill-b'], 'skill-b': ['skill-a'] })
+    const manager = new SkillsManager(createStore(), pluginPath)
+
+    expect(() => manager.listSkills()).toThrow('技能依赖存在循环：skill-a -> skill-b -> skill-a')
   })
 })

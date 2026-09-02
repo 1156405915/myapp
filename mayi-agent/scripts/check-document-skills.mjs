@@ -68,7 +68,7 @@ for (const entry of directories) {
   }
   if (skillIds.has(manifest.id)) errors.push(`技能 ID 重复：${manifest.id}`)
   skillIds.add(manifest.id)
-  if (!manifest.displayName || !manifest.category || !manifest.icon || !manifest.license) {
+  if (!manifest.displayName || !manifest.description || !/[\u3400-\u9fff]/u.test(manifest.description) || !manifest.category || !manifest.icon || !manifest.license) {
     errors.push(`${entry.name} 缺少产品展示元数据`)
   }
   if (!versionPattern.test(manifest.version || '')) errors.push(`${entry.name} 的 version 无效`)

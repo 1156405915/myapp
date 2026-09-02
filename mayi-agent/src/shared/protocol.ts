@@ -21,8 +21,22 @@ export interface ContextUsage {
   maxTokens: number
 }
 
+export type AttachmentKind = 'image' | 'document' | 'text'
+
+export interface MessageAttachment {
+  id: string
+  name: string
+  kind: AttachmentKind
+  mimeType: string
+  size: number
+  relativePath: string
+  width?: number
+  height?: number
+}
+
 export type ContentBlock =
   | { type: 'text'; text: string }
+  | { type: 'attachment'; attachment: MessageAttachment }
   | { type: 'thinking'; thinking: string }
   | { type: 'tool_use'; toolUseId: string; toolName: string; input: Record<string, unknown> }
   | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
@@ -42,6 +56,7 @@ export interface ChatMessage {
 }
 
 export interface PublicAppConfig {
+  baseUrl: string
   model: string
   cwd: string
   hasApiKey: boolean
@@ -50,6 +65,8 @@ export interface PublicAppConfig {
 export interface AppConfigPatch {
   /** 省略或传入空字符串表示保留已经存储的密钥。 */
   apiKey?: string
+  /** 传入空字符串时恢复 DeepSeek 默认地址。 */
+  baseUrl?: string
   model?: string
   cwd?: string
 }
@@ -129,6 +146,14 @@ export interface StartSessionInput {
 export interface SendMessageInput {
   sessionId: string
   prompt: string
+  attachmentIds?: string[]
+}
+
+export interface AttachmentBytesInput {
+  sessionId: string
+  name: string
+  mimeType: string
+  bytes: Uint8Array
 }
 
 export interface MayiApi {
@@ -147,6 +172,8 @@ export interface MayiApi {
     list(): Promise<ChatSession[]>
     /** 创建会话并提交首条消息。 */
     create(input: StartSessionInput): Promise<ChatSession>
+    /** 创建尚未发送消息的会话，用于先导入附件。 */
+    createDraft(): Promise<ChatSession>
     /** 获取会话消息历史。 */
     messages(sessionId: string): Promise<ChatMessage[]>
     /** 向已有会话发送消息。 */
@@ -169,6 +196,18 @@ export interface MayiApi {
     list(): Promise<SkillInfo[]>
     /** 更新技能状态并返回最新权威列表。 */
     setEnabled(input: SetSkillEnabledInput): Promise<SkillInfo[]>
+  }
+  attachments: {
+    /** 使用原生选择器导入文件。 */
+    select(sessionId: string): Promise<MessageAttachment[]>
+    /** 导入拖拽文件；路径只在 preload 内解析。 */
+    importFiles(sessionId: string, files: File[]): Promise<MessageAttachment[]>
+    /** 导入剪贴板中没有本地路径的图片。 */
+    importBytes(input: AttachmentBytesInput): Promise<MessageAttachment>
+    /** 删除尚未发送的附件。 */
+    discard(attachmentId: string): Promise<void>
+    /** 在资源管理器中定位附件。 */
+    reveal(attachmentId: string): Promise<void>
   }
   /** 订阅主进程事件并返回退订函数。 */
   onEvent(callback: (event: ServerEvent) => void): () => void

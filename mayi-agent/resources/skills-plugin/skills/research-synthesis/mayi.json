@@ -1,6 +1,7 @@
 {
   "id": "research-synthesis",
   "displayName": "资料综合",
+  "description": "综合多份资料和来源，归纳共识、分歧、证据与结论。",
   "category": "document-intelligence",
   "icon": "web",
   "version": "1.0.0",

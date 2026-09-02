@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto'
 import type {
   ChatMessage,
   ChatSession,
+  MessageAttachment,
   PermissionDecision,
   PermissionRequest,
   PermissionResponseInput,
   ServerEvent
 } from '../../shared/protocol'
 import { ClaudeAgentRunner } from '../agent/claude-agent-runner'
+import { AttachmentManager } from '../attachments/attachment-manager'
 import {
   createTraceId,
   logError,
@@ -20,6 +22,7 @@ import type { SkillsManager } from '../skills/skills-manager'
 
 interface QueuedPrompt {
   prompt: string
+  attachments: MessageAttachment[]
 }
 
 interface PendingPermission {
@@ -41,7 +44,8 @@ export class SessionManager {
     private readonly store: AppStore,
     private readonly runner: ClaudeAgentRunner,
     private readonly sendEvent: (event: ServerEvent) => void,
-    private readonly skills: SkillsManager
+    private readonly skills: SkillsManager,
+    private readonly attachments: AttachmentManager
   ) {}
 
   /** 返回按存储层规则排序的全部会话。 */
@@ -58,11 +62,19 @@ export class SessionManager {
   /** 创建会话、保存首条用户消息并立即加入执行队列。 */
   createSession(prompt: string, title?: string): ChatSession {
     const normalizedPrompt = this.normalizePrompt(prompt)
+    const session = this.createDraftSession(title || normalizedPrompt)
+    this.addUserMessage(session.id, normalizedPrompt, [])
+    this.enqueue(session.id, normalizedPrompt, [])
+    return session
+  }
+
+  /** 创建固定工作区的空会话，允许在首条消息前安全导入附件。 */
+  createDraftSession(title = '新会话'): ChatSession {
     const now = Date.now()
     const config = this.store.getPublicConfig()
     const session: ChatSession = {
       id: randomUUID(),
-      title: this.normalizeTitle(title || normalizedPrompt),
+      title: this.normalizeTitle(title),
       status: 'idle',
       cwd: config.cwd,
       createdAt: now,
@@ -71,17 +83,25 @@ export class SessionManager {
 
     this.store.saveSession(session)
     this.sendEvent({ type: 'session.created', payload: { session } })
-    this.addUserMessage(session.id, normalizedPrompt)
-    this.enqueue(session.id, normalizedPrompt)
     return session
   }
 
   /** 将用户消息追加到已有会话并排队执行。 */
-  sendMessage(sessionId: string, prompt: string): void {
-    this.requireSession(sessionId)
-    const normalizedPrompt = this.normalizePrompt(prompt)
-    this.addUserMessage(sessionId, normalizedPrompt)
-    this.enqueue(sessionId, normalizedPrompt)
+  sendMessage(sessionId: string, prompt: string, attachmentIds: string[] = []): void {
+    const session = this.requireSession(sessionId)
+    const attachments = this.store
+      .getAttachments(sessionId, this.normalizeAttachmentIds(attachmentIds), true)
+      .map((attachment) => ({ ...attachment }))
+    const normalizedPrompt = this.normalizePrompt(prompt, attachments.length > 0)
+    if (this.store.listMessages(sessionId).length === 0) {
+      this.updateSession({
+        ...session,
+        title: this.normalizeTitle(normalizedPrompt || attachments[0]?.name || '附件任务'),
+        updatedAt: Date.now()
+      })
+    }
+    this.addUserMessage(sessionId, normalizedPrompt, attachments)
+    this.enqueue(sessionId, normalizedPrompt, attachments)
   }
 
   /** 同时清空排队任务、拒绝待决权限并中止当前执行。 */
@@ -108,17 +128,22 @@ export class SessionManager {
 
   /** 先终止会话相关异步状态，再删除持久化数据。 */
   deleteSession(sessionId: string): void {
-    this.requireSession(sessionId)
+    const session = this.requireSession(sessionId)
     this.cancel(sessionId)
     this.runner.forgetSession(sessionId)
     this.store.deleteSession(sessionId)
+    try {
+      this.attachments.deleteSessionFiles(sessionId, session.cwd)
+    } catch (error) {
+      logWarn('会话记录已删除，但附件目录清理失败', error)
+    }
     this.sendEvent({ type: 'session.deleted', payload: { sessionId } })
   }
 
   /** 保证同一会话串行执行，同时允许不同会话并行。 */
-  private enqueue(sessionId: string, prompt: string): void {
+  private enqueue(sessionId: string, prompt: string, attachments: MessageAttachment[]): void {
     const queue = this.queues.get(sessionId) || []
-    queue.push({ prompt })
+    queue.push({ prompt, attachments: attachments.map((attachment) => ({ ...attachment })) })
     this.queues.set(sessionId, queue)
     logInfo('消息已加入会话队列', { sessionId, queueLength: queue.length })
 
@@ -141,7 +166,7 @@ export class SessionManager {
 
         const session = this.requireSession(sessionId)
         this.updateSession({ ...session, status: 'running', updatedAt: Date.now() })
-        await this.processPrompt(session, item.prompt)
+        await this.processPrompt(session, item.prompt, item.attachments)
       }
     } finally {
       this.activeSessions.delete(sessionId)
@@ -156,16 +181,24 @@ export class SessionManager {
   }
 
   /** 执行单条提示，将流事件、最终回复或错误写入会话。 */
-  private async processPrompt(session: ChatSession, prompt: string): Promise<void> {
+  private async processPrompt(
+    session: ChatSession,
+    prompt: string,
+    attachments: MessageAttachment[]
+  ): Promise<void> {
     const traceId = createTraceId()
     await runWithLogContext(
       { sessionId: session.id, traceId, module: 'session' },
-      () => this.executePrompt(session, prompt)
+      () => this.executePrompt(session, prompt, attachments)
     )
   }
 
   /** 在已建立日志上下文的调用链中执行提示。 */
-  private async executePrompt(session: ChatSession, prompt: string): Promise<void> {
+  private async executePrompt(
+    session: ChatSession,
+    prompt: string,
+    attachments: MessageAttachment[]
+  ): Promise<void> {
     try {
       logInfo('开始处理会话提示', { promptLength: prompt.length })
       const enabledSkillIds = this.skills.getEnabledSkillIds()
@@ -186,7 +219,7 @@ export class SessionManager {
         onPermission: (request, signal) => {
           return this.requestPermission(request, signal)
         }
-      })
+      }, attachments)
 
       // SDK 可能在取消后仍返回结果，迟到结果不能再写入历史记录。
       if (this.cancelledSessions.has(session.id)) return
@@ -241,15 +274,22 @@ export class SessionManager {
   }
 
   /** 持久化用户消息并通知当前渲染进程。 */
-  private addUserMessage(sessionId: string, prompt: string): void {
+  private addUserMessage(
+    sessionId: string,
+    prompt: string,
+    attachments: MessageAttachment[]
+  ): void {
     const message: ChatMessage = {
       id: randomUUID(),
       sessionId,
       role: 'user',
-      blocks: [{ type: 'text', text: prompt }],
+      blocks: [
+        ...(prompt ? [{ type: 'text', text: prompt } as const] : []),
+        ...attachments.map((attachment) => ({ type: 'attachment', attachment } as const))
+      ],
       createdAt: Date.now()
     }
-    this.store.saveMessage(message)
+    this.store.saveMessage(message, attachments.map((attachment) => attachment.id))
     this.sendEvent({ type: 'message.created', payload: { message } })
   }
 
@@ -325,11 +365,20 @@ export class SessionManager {
   }
 
   /** 规范化用户提示并执行 IPC 边界长度限制。 */
-  private normalizePrompt(prompt: string): string {
+  private normalizePrompt(prompt: string, allowEmpty = false): string {
     if (typeof prompt !== 'string') throw new Error('消息格式无效')
     const normalized = prompt.trim()
-    if (!normalized) throw new Error('消息不能为空')
+    if (!normalized && !allowEmpty) throw new Error('消息不能为空')
     if (normalized.length > 100_000) throw new Error('消息内容过长')
+    return normalized
+  }
+
+  /** 限制附件 ID 数量并拒绝重复或非字符串值。 */
+  private normalizeAttachmentIds(attachmentIds: string[]): string[] {
+    if (!Array.isArray(attachmentIds) || attachmentIds.length > 10) throw new Error('附件列表无效')
+    if (attachmentIds.some((id) => typeof id !== 'string' || !id.trim())) throw new Error('附件 ID 无效')
+    const normalized = attachmentIds.map((id) => id.trim())
+    if (new Set(normalized).size !== normalized.length) throw new Error('附件列表包含重复项')
     return normalized
   }
 

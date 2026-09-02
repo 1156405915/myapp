@@ -1,6 +1,7 @@
 {
   "id": "document-review",
   "displayName": "文档审查",
+  "description": "审查文档的完整性、一致性、风险、歧义和潜在问题。",
   "category": "document-intelligence",
   "icon": "check",
   "version": "1.0.0",

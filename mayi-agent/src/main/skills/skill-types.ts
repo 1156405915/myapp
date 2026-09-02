@@ -10,6 +10,7 @@ export interface SkillReference {
 export interface MayiSkillManifest {
   id: string
   displayName: string
+  description: string
   category: string
   icon: string
   version: string

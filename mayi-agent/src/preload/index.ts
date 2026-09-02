@@ -1,9 +1,11 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppConfigPatch,
+  AttachmentBytesInput,
   ChatMessage,
   ChatSession,
   MayiApi,
+  MessageAttachment,
   PermissionResponseInput,
   PublicAppConfig,
   SendMessageInput,
@@ -32,6 +34,8 @@ const api: MayiApi = {
     /** 创建会话并提交首条消息。 */
     create: (input: StartSessionInput): Promise<ChatSession> =>
       ipcRenderer.invoke('sessions:create', input),
+    /** 创建用于附件导入的空会话。 */
+    createDraft: (): Promise<ChatSession> => ipcRenderer.invoke('sessions:create-draft'),
     /** 获取指定会话的消息。 */
     messages: (sessionId: string): Promise<ChatMessage[]> =>
       ipcRenderer.invoke('sessions:messages', sessionId),
@@ -57,6 +61,25 @@ const api: MayiApi = {
     /** 更新技能开关，结果以主进程返回列表为准。 */
     setEnabled: (input: SetSkillEnabledInput): Promise<SkillInfo[]> =>
       ipcRenderer.invoke('skills:set-enabled', input)
+  },
+  attachments: {
+    /** 打开原生文件选择器并返回已安全复制的附件。 */
+    select: (sessionId: string): Promise<MessageAttachment[]> =>
+      ipcRenderer.invoke('attachments:select', sessionId),
+    /** File 的真实路径仅在 preload 内解析，不直接暴露给渲染进程。 */
+    importFiles: (sessionId: string, files: File[]): Promise<MessageAttachment[]> => {
+      const paths = files.map((file) => webUtils.getPathForFile(file)).filter(Boolean)
+      return ipcRenderer.invoke('attachments:import-paths', sessionId, paths)
+    },
+    /** 导入剪贴板中的内存图片。 */
+    importBytes: (input: AttachmentBytesInput): Promise<MessageAttachment> =>
+      ipcRenderer.invoke('attachments:import-bytes', input),
+    /** 删除尚未发送的附件。 */
+    discard: (attachmentId: string): Promise<void> =>
+      ipcRenderer.invoke('attachments:discard', attachmentId),
+    /** 在系统资源管理器中定位附件。 */
+    reveal: (attachmentId: string): Promise<void> =>
+      ipcRenderer.invoke('attachments:reveal', attachmentId)
   },
   /** 订阅主进程事件，并返回必须在销毁时调用的退订函数。 */
   onEvent: (callback: (event: ServerEvent) => void): (() => void) => {

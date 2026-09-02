@@ -21,6 +21,7 @@ function createSkillDirectory(id: string, manifestId = id): string {
     JSON.stringify({
       id: manifestId,
       displayName: '测试技能',
+      description: '用于测试技能解析和产品展示。',
       category: 'document-intelligence',
       icon: 'file',
       version: '1.0.0',
@@ -52,6 +53,7 @@ describe('Skill 解析', () => {
     const skill = parseSkillDirectory(createSkillDirectory('demo-skill'))
     expect(skill.id).toBe('demo-skill')
     expect(skill.manifest.displayName).toBe('测试技能')
+    expect(skill.manifest.description).toBe('用于测试技能解析和产品展示。')
   })
 
   it('拒绝目录、frontmatter 与产品元数据不一致', () => {

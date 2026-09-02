@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunResult } from '../src/main/agent/claude-agent-runner'
-import type { ChatMessage, ChatSession, PermissionDecision, ServerEvent } from '../src/shared/protocol'
+import type {
+  ChatMessage,
+  ChatSession,
+  MessageAttachment,
+  PermissionDecision,
+  ServerEvent
+} from '../src/shared/protocol'
 import { SessionManager } from '../src/main/session/session-manager'
 import type { AppStore } from '../src/main/store/app-store'
 import type { ClaudeAgentRunner } from '../src/main/agent/claude-agent-runner'
 import type { SkillsManager } from '../src/main/skills/skills-manager'
+import type { AttachmentManager } from '../src/main/attachments/attachment-manager'
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -31,14 +38,31 @@ async function flushAsyncWork(): Promise<void> {
 }
 
 /** 构造只覆盖 SessionManager 所需接口的内存存储。 */
-function createStore(): AppStore & { sessions: ChatSession[]; messages: ChatMessage[] } {
+function createStore(): AppStore & {
+  sessions: ChatSession[]
+  messages: ChatMessage[]
+  attachments: MessageAttachment[]
+} {
   const sessions: ChatSession[] = []
   const messages: ChatMessage[] = []
+  const attachments: MessageAttachment[] = []
   return {
     sessions,
     messages,
-    getPublicConfig: () => ({ model: 'deepseek-v4-pro', cwd: process.cwd(), hasApiKey: true }),
-    getRuntimeConfig: () => ({ model: 'deepseek-v4-pro', cwd: process.cwd(), hasApiKey: true, apiKey: 'test-key' }),
+    attachments,
+    getPublicConfig: () => ({
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      model: 'deepseek-v4-pro',
+      cwd: process.cwd(),
+      hasApiKey: true
+    }),
+    getRuntimeConfig: () => ({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      model: 'deepseek-v4-pro',
+      cwd: process.cwd(),
+      hasApiKey: true
+    }),
     listSessions: () => [...sessions],
     getSession: (sessionId: string) => sessions.find((session) => session.id === sessionId),
     saveSession: (session: ChatSession) => {
@@ -54,8 +78,14 @@ function createStore(): AppStore & { sessions: ChatSession[]; messages: ChatMess
       }
     },
     listMessages: (sessionId: string) => messages.filter((message) => message.sessionId === sessionId),
+    getAttachments: (_sessionId: string, ids: string[]) =>
+      ids.map((id) => attachments.find((attachment) => attachment.id === id)).filter(Boolean),
     saveMessage: (message: ChatMessage) => messages.push(message)
-  } as unknown as AppStore & { sessions: ChatSession[]; messages: ChatMessage[] }
+  } as unknown as AppStore & {
+    sessions: ChatSession[]
+    messages: ChatMessage[]
+    attachments: MessageAttachment[]
+  }
 }
 
 /** 构造可注入执行行为的 Agent Runner。 */
@@ -100,8 +130,11 @@ function createManager(store: AppStore, runner: ClaudeAgentRunner): {
     getEnabledSkillIds: vi.fn(() => ['pdf', 'document-summary']),
     getPluginPath: vi.fn(() => 'test-skills-plugin')
   } as unknown as SkillsManager
+  const attachments = {
+    deleteSessionFiles: vi.fn()
+  } as unknown as AttachmentManager
   return {
-    manager: new SessionManager(store, runner, (event) => events.push(event), skills),
+    manager: new SessionManager(store, runner, (event) => events.push(event), skills, attachments),
     events
   }
 }
@@ -135,7 +168,13 @@ describe('SessionManager 会话队列', () => {
       snapshots.push([...config.enabledSkillIds])
       return successfulResult(prompt)
     })
-    const manager = new SessionManager(store, runner, () => undefined, skills)
+    const manager = new SessionManager(
+      store,
+      runner,
+      () => undefined,
+      skills,
+      { deleteSessionFiles: vi.fn() } as unknown as AttachmentManager
+    )
 
     const session = manager.createSession('第一条')
     await vi.waitFor(() => expect(snapshots).toHaveLength(1))
@@ -201,6 +240,40 @@ describe('SessionManager 会话队列', () => {
     expect(runner.run).toHaveBeenCalledTimes(1)
     expect(store.listMessages(session.id).filter((message) => message.role === 'assistant')).toHaveLength(0)
     expect(store.getSession(session.id)?.status).toBe('idle')
+  })
+
+  it('按消息保存并传递不可变的附件快照', async () => {
+    const store = createStore()
+    const captured: MessageAttachment[][] = []
+    const attachment: MessageAttachment = {
+      id: 'attachment-1',
+      name: '合同.pdf',
+      kind: 'document',
+      mimeType: 'application/pdf',
+      size: 123,
+      relativePath: '.mayi/attachments/session/file.pdf'
+    }
+    store.attachments.push(attachment)
+    const runner = {
+      run: vi.fn(async (_session, _prompt, _config, _callbacks, attachments) => {
+        captured.push(attachments.map((item: MessageAttachment) => ({ ...item })))
+        return successfulResult('done')
+      }),
+      cancel: vi.fn(),
+      forgetSession: vi.fn()
+    } as unknown as ClaudeAgentRunner
+    const { manager } = createManager(store, runner)
+    const session = manager.createDraftSession()
+    attachment.relativePath = `.mayi/attachments/${session.id}/file.pdf`
+
+    manager.sendMessage(session.id, '', [attachment.id])
+    attachment.name = '被修改的名称.pdf'
+    await vi.waitFor(() => expect(captured).toHaveLength(1))
+
+    expect(captured[0][0].name).toBe('合同.pdf')
+    expect(store.listMessages(session.id)[0].blocks).toEqual([
+      { type: 'attachment', attachment: expect.objectContaining({ id: attachment.id, name: '合同.pdf' }) }
+    ])
   })
 })
 

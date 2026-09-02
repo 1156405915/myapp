@@ -15,9 +15,11 @@ import { logError, logInfo, logWarn } from '../logging/logger'
 import { validateWorkspaceRoot } from '../security/workspace-guard'
 import type {
   AppConfigPatch,
+  AttachmentKind,
   ChatMessage,
   ChatSession,
   ContentBlock,
+  MessageAttachment,
   PublicAppConfig
 } from '../../shared/protocol'
 
@@ -25,6 +27,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof
 type DatabaseConnection = InstanceType<typeof DatabaseSync>
 
 interface LegacyStoredConfig {
+  baseUrl?: string
   model?: string
   cwd?: string
   encryptedApiKey?: string
@@ -66,8 +69,42 @@ interface ContentBlockRow {
   block_json: string
 }
 
-const DATABASE_VERSION = 2
+interface AttachmentRow {
+  id: string
+  session_id: string
+  message_id: string | null
+  original_name: string
+  relative_path: string
+  mime_type: string
+  kind: AttachmentKind
+  size: number
+  width: number | null
+  height: number | null
+  created_at: number
+}
+
+const DATABASE_VERSION = 3
+const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
 const DEEPSEEK_MODELS = new Set(['deepseek-v4-pro', 'deepseek-v4-flash'])
+
+/** 仅允许 HTTPS，或用于本机开发的 HTTP 回环地址。 */
+function normalizeBaseUrl(value: string): string {
+  const candidate = value.trim() || DEFAULT_ANTHROPIC_BASE_URL
+  let url: URL
+  try {
+    url = new URL(candidate)
+  } catch {
+    throw new Error('API Base URL 无效')
+  }
+  const isLoopback = ['localhost', '127.0.0.1', '::1'].includes(url.hostname)
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopback)) {
+    throw new Error('API Base URL 必须使用 HTTPS，本机回环地址可使用 HTTP')
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('API Base URL 不能包含凭据、查询参数或片段')
+  }
+  return url.toString().replace(/\/$/, '')
+}
 
 export class AppStore {
   private readonly dataDirectory: string
@@ -204,6 +241,27 @@ export class AppStore {
           PRAGMA user_version = 2;
         `)
       }
+      if (row.user_version < 3) {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS attachments (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+            original_name TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('image', 'document', 'text')),
+            size INTEGER NOT NULL,
+            width INTEGER,
+            height INTEGER,
+            created_at INTEGER NOT NULL,
+            UNIQUE(session_id, relative_path)
+          );
+          CREATE INDEX IF NOT EXISTS idx_attachments_session_message
+            ON attachments(session_id, message_id);
+          PRAGMA user_version = 3;
+        `)
+      }
     })
     logInfo('SQLite 数据库迁移完成', { version: DATABASE_VERSION })
   }
@@ -217,6 +275,9 @@ export class AppStore {
       this.transaction(() => {
         if (parsed.config?.model && DEEPSEEK_MODELS.has(parsed.config.model)) {
           this.setSetting('model', parsed.config.model)
+        }
+        if (parsed.config?.baseUrl) {
+          this.setSetting('base_url', normalizeBaseUrl(parsed.config.baseUrl))
         }
         if (parsed.config?.cwd) this.setSetting('cwd', resolve(parsed.config.cwd))
         if (parsed.config?.encryptedApiKey) {
@@ -242,6 +303,7 @@ export class AppStore {
 
   /** 确保首次启动拥有合法模型和默认工作目录。 */
   private ensureDefaultConfig(): void {
+    if (!this.getSetting('base_url')) this.setSetting('base_url', DEFAULT_ANTHROPIC_BASE_URL)
     if (!DEEPSEEK_MODELS.has(this.getSetting('model') || '')) {
       this.setSetting('model', 'deepseek-v4-pro')
     }
@@ -321,6 +383,7 @@ export class AppStore {
   getPublicConfig(): PublicAppConfig {
     const encryptedApiKey = this.getSetting('encrypted_api_key')
     return {
+      baseUrl: this.getSetting('base_url') || DEFAULT_ANTHROPIC_BASE_URL,
       model: this.getSetting('model') || 'deepseek-v4-pro',
       cwd: this.getSetting('cwd') || app.getPath('documents'),
       hasApiKey: Boolean(
@@ -344,6 +407,9 @@ export class AppStore {
   /** 校验并以事务保存公开配置补丁。 */
   updateConfig(patch: AppConfigPatch): PublicAppConfig {
     this.transaction(() => {
+      if (patch.baseUrl !== undefined) {
+        this.setSetting('base_url', normalizeBaseUrl(patch.baseUrl))
+      }
       if (patch.model !== undefined) {
         const model = patch.model.trim()
         if (!DEEPSEEK_MODELS.has(model)) throw new Error('不支持的 DeepSeek 模型')
@@ -389,6 +455,67 @@ export class AppStore {
           updated_at = excluded.updated_at
       `)
       .run(skillId.trim(), enabled ? 1 : 0, Date.now())
+  }
+
+  /** 保存由主进程验证并复制完成的待发送附件。 */
+  saveAttachment(sessionId: string, attachment: MessageAttachment): void {
+    if (!this.getSession(sessionId)) throw new Error('附件所属会话不存在')
+    this.database
+      .prepare(`
+        INSERT INTO attachments(
+          id, session_id, message_id, original_name, relative_path, mime_type,
+          kind, size, width, height, created_at
+        ) VALUES(?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        attachment.id,
+        sessionId,
+        attachment.name,
+        attachment.relativePath,
+        attachment.mimeType,
+        attachment.kind,
+        attachment.size,
+        attachment.width ?? null,
+        attachment.height ?? null,
+        Date.now()
+      )
+  }
+
+  /** 按会话读取附件快照，可选择只允许尚未绑定消息的附件。 */
+  getAttachments(sessionId: string, attachmentIds: string[], pendingOnly = false): MessageAttachment[] {
+    if (!Array.isArray(attachmentIds) || attachmentIds.length > 10) throw new Error('附件列表无效')
+    const uniqueIds = [...new Set(attachmentIds)]
+    if (uniqueIds.length !== attachmentIds.length) throw new Error('附件列表包含重复项')
+    if (uniqueIds.length === 0) return []
+
+    const placeholders = uniqueIds.map(() => '?').join(', ')
+    const rows = this.database
+      .prepare(`
+        SELECT * FROM attachments
+        WHERE session_id = ? AND id IN (${placeholders})${pendingOnly ? ' AND message_id IS NULL' : ''}
+      `)
+      .all(sessionId, ...uniqueIds) as unknown as AttachmentRow[]
+    const byId = new Map(rows.map((row) => [row.id, this.mapAttachment(row)]))
+    const attachments = uniqueIds.map((id) => byId.get(id)).filter(Boolean) as MessageAttachment[]
+    if (attachments.length !== uniqueIds.length) throw new Error('附件不存在、已发送或不属于当前会话')
+    return attachments
+  }
+
+  /** 按主键读取附件，供受控删除和资源管理器定位使用。 */
+  getAttachment(attachmentId: string): (MessageAttachment & { sessionId: string; pending: boolean }) | undefined {
+    const row = this.database.prepare('SELECT * FROM attachments WHERE id = ?').get(attachmentId) as
+      | AttachmentRow
+      | undefined
+    return row
+      ? { ...this.mapAttachment(row), sessionId: row.session_id, pending: row.message_id === null }
+      : undefined
+  }
+
+  /** 删除未绑定消息的附件记录；已发送附件不可由草稿操作删除。 */
+  deletePendingAttachment(attachmentId: string): boolean {
+    return this.database
+      .prepare('DELETE FROM attachments WHERE id = ? AND message_id IS NULL')
+      .run(attachmentId).changes === 1
   }
 
   /** 返回最近更新优先的全部会话。 */
@@ -452,8 +579,9 @@ export class AppStore {
   }
 
   /** 在事务中保存消息、内容块和可查询 Trace 步骤。 */
-  saveMessage(message: ChatMessage): void {
+  saveMessage(message: ChatMessage, attachmentIds: string[] = []): void {
     this.transaction(() => {
+      const attachments = this.getAttachments(message.sessionId, attachmentIds, true)
       this.database
         .prepare(`
           INSERT INTO messages(
@@ -484,10 +612,17 @@ export class AppStore {
       message.blocks.forEach((block, index) => {
         const payload = JSON.stringify(block)
         insertBlock.run(message.id, index, block.type, payload)
-        if (block.type !== 'text') {
+        if (block.type !== 'text' && block.type !== 'attachment') {
           insertTrace.run(message.id, index, block.type, payload, message.createdAt)
         }
       })
+      const bindAttachment = this.database.prepare(
+        'UPDATE attachments SET message_id = ? WHERE id = ? AND session_id = ? AND message_id IS NULL'
+      )
+      for (const attachment of attachments) {
+        const result = bindAttachment.run(message.id, attachment.id, message.sessionId)
+        if (result.changes !== 1) throw new Error('附件绑定消息失败')
+      }
     })
   }
 
@@ -534,6 +669,20 @@ export class AppStore {
           ? { usedTokens: row.context_used_tokens, maxTokens: row.context_max_tokens }
           : undefined,
       isError: Boolean(row.is_error)
+    }
+  }
+
+  /** 将附件存储行转换为不包含绝对源路径的共享实体。 */
+  private mapAttachment(row: AttachmentRow): MessageAttachment {
+    return {
+      id: row.id,
+      name: row.original_name,
+      kind: row.kind,
+      mimeType: row.mime_type,
+      size: row.size,
+      relativePath: row.relative_path,
+      width: row.width ?? undefined,
+      height: row.height ?? undefined
     }
   }
 }

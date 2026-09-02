@@ -1,6 +1,7 @@
 {
   "id": "pdf",
   "displayName": "PDF 智能处理",
+  "description": "读取、编辑、生成和校验 PDF，支持表单、页面处理与视觉验收。",
   "category": "artifact",
   "icon": "file",
   "version": "1.0.0",

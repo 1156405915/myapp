@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ChatMessage, ChatSession } from '../src/shared/protocol'
+import type { ChatMessage, ChatSession, MessageAttachment } from '../src/shared/protocol'
 
 vi.mock('electron', () => ({
   app: {
@@ -39,6 +39,30 @@ afterEach(() => {
 })
 
 describe('AppStore SQLite 持久化', () => {
+  it('默认使用 DeepSeek Base URL，并持久化合法的自定义地址', () => {
+    const directory = createTemporaryDirectory()
+    const store = new AppStore(directory)
+
+    expect(store.getPublicConfig().baseUrl).toBe('https://api.deepseek.com/anthropic')
+    expect(store.updateConfig({ baseUrl: 'https://api.example.com/anthropic/' }).baseUrl).toBe(
+      'https://api.example.com/anthropic'
+    )
+    expect(() => store.updateConfig({ baseUrl: 'http://api.example.com' })).toThrow(
+      '必须使用 HTTPS'
+    )
+    store.close()
+
+    const reopened = new AppStore(directory)
+    try {
+      expect(reopened.getPublicConfig().baseUrl).toBe('https://api.example.com/anthropic')
+      expect(reopened.updateConfig({ baseUrl: '' }).baseUrl).toBe(
+        'https://api.deepseek.com/anthropic'
+      )
+    } finally {
+      reopened.close()
+    }
+  })
+
   it('持久化单个技能的用户启用状态', () => {
     const directory = createTemporaryDirectory()
     const store = new AppStore(directory)
@@ -135,10 +159,85 @@ describe('AppStore SQLite 持久化', () => {
 
     const reopened = new AppStore(directory)
     try {
-      expect(reopened.listMessages(session.id)).toEqual([message])
+      expect(reopened.listMessages(session.id)).toEqual([expect.objectContaining(message)])
     } finally {
       reopened.close()
     }
+  })
+
+  it('持久化附件并在同一事务中绑定到用户消息', () => {
+    const directory = createTemporaryDirectory()
+    const now = Date.now()
+    const session: ChatSession = {
+      id: 'attachment-session',
+      title: '附件会话',
+      status: 'idle',
+      cwd: process.cwd(),
+      createdAt: now,
+      updatedAt: now
+    }
+    const attachment: MessageAttachment = {
+      id: 'attachment-id',
+      name: '合同.pdf',
+      kind: 'document',
+      mimeType: 'application/pdf',
+      size: 1024,
+      relativePath: '.mayi/attachments/attachment-session/attachment-id.pdf'
+    }
+    const message: ChatMessage = {
+      id: 'attachment-message',
+      sessionId: session.id,
+      role: 'user',
+      blocks: [
+        { type: 'text', text: '请总结' },
+        { type: 'attachment', attachment }
+      ],
+      createdAt: now
+    }
+
+    const store = new AppStore(directory)
+    store.saveSession(session)
+    store.saveAttachment(session.id, attachment)
+    expect(store.getAttachments(session.id, [attachment.id], true)).toEqual([attachment])
+    store.saveMessage(message, [attachment.id])
+    expect(() => store.getAttachments(session.id, [attachment.id], true)).toThrow('已发送')
+    store.close()
+
+    const reopened = new AppStore(directory)
+    try {
+      expect(reopened.listMessages(session.id)).toEqual([expect.objectContaining(message)])
+      expect(reopened.getAttachment(attachment.id)).toMatchObject({
+        ...attachment,
+        sessionId: session.id,
+        pending: false
+      })
+    } finally {
+      reopened.close()
+    }
+  })
+
+  it('拒绝跨会话绑定附件', () => {
+    const directory = createTemporaryDirectory()
+    const store = new AppStore(directory)
+    const now = Date.now()
+    const left: ChatSession = {
+      id: 'left-session', title: '左', status: 'idle', cwd: process.cwd(), createdAt: now, updatedAt: now
+    }
+    const right: ChatSession = {
+      id: 'right-session', title: '右', status: 'idle', cwd: process.cwd(), createdAt: now, updatedAt: now
+    }
+    store.saveSession(left)
+    store.saveSession(right)
+    store.saveAttachment(left.id, {
+      id: 'left-attachment',
+      name: 'a.txt',
+      kind: 'text',
+      mimeType: 'text/plain',
+      size: 1,
+      relativePath: '.mayi/attachments/left-session/a.txt'
+    })
+    expect(() => store.getAttachments(right.id, ['left-attachment'], true)).toThrow('不属于当前会话')
+    store.close()
   })
 
   it('数据库损坏时从最近完整备份恢复', () => {

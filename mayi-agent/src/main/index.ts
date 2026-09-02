@@ -1,8 +1,9 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type {
   AppConfigPatch,
+  AttachmentBytesInput,
   PermissionResponseInput,
   SendMessageInput,
   ServerEvent,
@@ -10,6 +11,7 @@ import type {
   StartSessionInput
 } from '../shared/protocol'
 import { ClaudeAgentRunner } from './agent/claude-agent-runner'
+import { AttachmentManager } from './attachments/attachment-manager'
 import { SessionManager } from './session/session-manager'
 import { SkillsManager } from './skills/skills-manager'
 import { AppStore } from './store/app-store'
@@ -113,7 +115,12 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
 }
 
 /** 注册经过发送方校验和输入校验的主进程 IPC 能力。 */
-function registerIpc(store: AppStore, sessions: SessionManager, skills: SkillsManager): void {
+function registerIpc(
+  store: AppStore,
+  sessions: SessionManager,
+  skills: SkillsManager,
+  attachments: AttachmentManager
+): void {
   /** 返回应用版本，不向渲染进程暴露 Electron 对象。 */
   ipcMain.handle('app:version', (event) => {
     assertTrustedSender(event)
@@ -147,6 +154,11 @@ function registerIpc(store: AppStore, sessions: SessionManager, skills: SkillsMa
     assertTrustedSender(event)
     return sessions.createSession(input?.prompt, input?.title)
   })
+  /** 创建固定工作区的空会话，支持先添加附件再发送。 */
+  ipcMain.handle('sessions:create-draft', (event) => {
+    assertTrustedSender(event)
+    return sessions.createDraftSession()
+  })
   /** 读取指定会话的消息历史。 */
   ipcMain.handle('sessions:messages', (event, sessionId: string) => {
     assertTrustedSender(event)
@@ -155,7 +167,7 @@ function registerIpc(store: AppStore, sessions: SessionManager, skills: SkillsMa
   /** 向已有会话追加提示。 */
   ipcMain.handle('sessions:send', (event, input: SendMessageInput) => {
     assertTrustedSender(event)
-    sessions.sendMessage(input?.sessionId, input?.prompt)
+    sessions.sendMessage(input?.sessionId, input?.prompt, input?.attachmentIds)
   })
   /** 取消会话的当前任务和排队任务。 */
   ipcMain.handle('sessions:cancel', (event, sessionId: string) => {
@@ -199,6 +211,48 @@ function registerIpc(store: AppStore, sessions: SessionManager, skills: SkillsMa
     if (!input || typeof input !== 'object') throw new Error('技能开关参数无效')
     return skills.setEnabled(input.id, input.enabled)
   })
+  /** 使用原生多选文件对话框并直接导入受控副本，不返回原始绝对路径。 */
+  ipcMain.handle('attachments:select', async (event, sessionId: string) => {
+    assertTrustedSender(event)
+    if (!mainWindow) return []
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '添加附件',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        {
+          name: '支持的文件',
+          extensions: [
+            'pdf', 'docx', 'pptx', 'xlsx', 'csv', 'tsv', 'txt', 'md', 'json', 'xml',
+            'yaml', 'yml', 'toml', 'sql', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'ts',
+            'tsx', 'js', 'jsx', 'py', 'java', 'go', 'rs', 'c', 'h', 'cpp', 'cs', 'html',
+            'css', 'vue', 'svelte', 'sh'
+          ]
+        }
+      ]
+    })
+    return result.canceled ? [] : attachments.importPaths(sessionId, result.filePaths)
+  })
+  /** 导入 preload 从拖拽 File 安全解析出的路径。 */
+  ipcMain.handle('attachments:import-paths', (event, sessionId: string, paths: string[]) => {
+    assertTrustedSender(event)
+    return attachments.importPaths(sessionId, paths)
+  })
+  /** 导入没有本地路径的剪贴板图片字节。 */
+  ipcMain.handle('attachments:import-bytes', (event, input: AttachmentBytesInput) => {
+    assertTrustedSender(event)
+    if (!input || typeof input !== 'object') throw new Error('附件数据无效')
+    return attachments.importBytes(input.sessionId, input.name, input.mimeType, input.bytes)
+  })
+  /** 只允许删除尚未绑定消息的附件。 */
+  ipcMain.handle('attachments:discard', (event, attachmentId: string) => {
+    assertTrustedSender(event)
+    attachments.discard(attachmentId)
+  })
+  /** 只按数据库附件 ID 定位文件，不接受渲染进程提供的任意路径。 */
+  ipcMain.handle('attachments:reveal', (event, attachmentId: string) => {
+    assertTrustedSender(event)
+    shell.showItemInFolder(attachments.getRevealPath(attachmentId))
+  })
 }
 
 if (!hasSingleInstanceLock) {
@@ -219,6 +273,7 @@ if (!hasSingleInstanceLock) {
     appStore = store
     const runner = new ClaudeAgentRunner()
     const skills = new SkillsManager(store)
+    const attachments = new AttachmentManager(store)
     /** 将会话管理器事件单向转发给可信渲染进程。 */
     const sessions = new SessionManager(
       store,
@@ -226,9 +281,10 @@ if (!hasSingleInstanceLock) {
       (event: ServerEvent) => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event)
       },
-      skills
+      skills,
+      attachments
     )
-    registerIpc(store, sessions, skills)
+    registerIpc(store, sessions, skills, attachments)
 
     /** macOS 从 Dock 激活且无窗口时重建主窗口。 */
     app.on('activate', () => {

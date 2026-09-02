@@ -1,6 +1,7 @@
 {
   "id": "information-extraction",
   "displayName": "信息提取",
+  "description": "从文档中准确提取人物、日期、金额、条款和结构化字段。",
   "category": "document-intelligence",
   "icon": "search",
   "version": "1.0.0",

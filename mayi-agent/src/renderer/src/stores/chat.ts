@@ -71,24 +71,39 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /** 根据是否已有活动会话选择创建或追加消息流程。 */
-  async function send(prompt: string): Promise<void> {
+  async function send(prompt: string, attachmentIds: string[] = []): Promise<boolean> {
     const text = prompt.trim()
-    if (!text) return
+    if (!text && attachmentIds.length === 0) return false
     error.value = ''
     streamingContent.value = ''
     activity.value = { kind: 'thinking', label: '正在思考' }
 
     try {
       if (activeSessionId.value) {
-        await window.mayi.sessions.send({ sessionId: activeSessionId.value, prompt: text })
+        await window.mayi.sessions.send({
+          sessionId: activeSessionId.value,
+          prompt: text,
+          attachmentIds
+        })
       } else {
+        if (attachmentIds.length > 0) throw new Error('附件发送前必须先创建会话')
         const session = await window.mayi.sessions.create({ prompt: text })
         activeSessionId.value = session.id
       }
+      return true
     } catch (reason) {
       setError(reason)
       activity.value = null
+      return false
     }
+  }
+
+  /** 确保附件导入前存在固定工作区的草稿会话。 */
+  async function ensureDraftSession(): Promise<string> {
+    if (activeSessionId.value) return activeSessionId.value
+    const session = await window.mayi.sessions.createDraft()
+    activeSessionId.value = session.id
+    return session.id
   }
 
   /** 取消当前会话并清理本地流式展示状态。 */
@@ -222,6 +237,7 @@ export const useChatStore = defineStore('chat', () => {
     initialize,
     selectSession,
     send,
+    ensureDraftSession,
     cancel,
     createNewSession,
     deleteSession,

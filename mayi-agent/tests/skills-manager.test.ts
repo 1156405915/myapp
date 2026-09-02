@@ -20,14 +20,16 @@ function createStore(): AppStore & { states: Record<string, boolean> } {
 }
 
 describe('SkillsManager', () => {
-  it('发现十个内置技能并合并默认状态', () => {
+  it('发现十一个内置技能并合并默认状态', () => {
     const manager = new SkillsManager(createStore(), resolve('resources/skills-plugin'))
     const skills = manager.listSkills()
 
-    expect(skills).toHaveLength(10)
+    expect(skills).toHaveLength(11)
     expect(skills.map((skill) => skill.id)).toContain('document-summary')
+    expect(skills.map((skill) => skill.id)).toContain('image-analysis')
     expect(skills.every((skill) => skill.source === 'builtin')).toBe(true)
-    expect(manager.getEnabledSkillIds()).toHaveLength(10)
+    expect(skills.every((skill) => /[\u3400-\u9fff]/u.test(skill.description))).toBe(true)
+    expect(manager.getEnabledSkillIds()).toHaveLength(11)
   })
 
   it('持久化开关并从下一次快照排除禁用技能', () => {

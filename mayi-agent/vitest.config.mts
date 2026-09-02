@@ -11,6 +11,7 @@ export default defineConfig({
       reporter: ['text', 'html'],
       include: [
         'src/main/logging/logger.ts',
+        'src/main/attachments/**/*.ts',
         'src/main/security/**/*.ts',
         'src/main/session/session-manager.ts',
         'src/main/skills/**/*.ts'

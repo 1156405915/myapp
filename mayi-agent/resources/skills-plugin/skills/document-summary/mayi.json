@@ -1,6 +1,7 @@
 {
   "id": "document-summary",
   "displayName": "文档总结",
+  "description": "提炼文档核心结论、关键事实、风险和待确认事项。",
   "category": "document-intelligence",
   "icon": "file",
   "version": "1.0.0",

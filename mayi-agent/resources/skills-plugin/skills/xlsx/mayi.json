@@ -1,6 +1,7 @@
 {
   "id": "xlsx",
   "displayName": "表格智能分析",
+  "description": "读取、分析和生成电子表格，支持公式重算、图表与打印检查。",
   "category": "artifact",
   "icon": "table",
   "version": "1.0.0",

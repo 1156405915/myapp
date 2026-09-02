@@ -27,7 +27,12 @@ const settingsError = ref('')
 const settingsSuccess = ref('')
 const settingsSaving = ref(false)
 const permissionResponding = ref(false)
-const settingsForm = reactive({ apiKey: '', model: 'deepseek-v4-pro', cwd: '' })
+const settingsForm = reactive({
+  apiKey: '',
+  baseUrl: 'https://api.deepseek.com/anthropic',
+  model: 'deepseek-v4-pro',
+  cwd: ''
+})
 
 const navigation: NavigationItem[] = [
   { label: '任务', icon: 'task', path: '/tasks' },
@@ -75,6 +80,7 @@ function openSettings(): void {
   settingsOpen.value = true
   ui.accountMenuOpen = false
   settingsForm.apiKey = ''
+  settingsForm.baseUrl = chat.config?.baseUrl || 'https://api.deepseek.com/anthropic'
   settingsForm.model = chat.config?.model || 'deepseek-v4-pro'
   settingsForm.cwd = chat.config?.cwd || ''
   settingsError.value = ''
@@ -231,7 +237,7 @@ function handleLogout(): void {
         <header>
           <div>
             <h2>Agent 设置</h2>
-            <p>配置 DeepSeek 模型和默认工作目录</p>
+            <p>配置 API 接口、DeepSeek 模型和默认工作目录</p>
           </div>
           <button type="button" aria-label="关闭" @click="settingsOpen = false">×</button>
         </header>
@@ -242,6 +248,15 @@ function handleLogout(): void {
             type="password"
             autocomplete="off"
             :placeholder="chat.config?.hasApiKey ? '已安全保存，留空则不修改' : '输入 DeepSeek API Key'"
+          />
+        </label>
+        <label>
+          <span>API Base URL</span>
+          <input
+            v-model="settingsForm.baseUrl"
+            type="url"
+            autocomplete="url"
+            placeholder="https://api.deepseek.com/anthropic"
           />
         </label>
         <label>

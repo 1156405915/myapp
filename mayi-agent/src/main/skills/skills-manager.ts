@@ -56,7 +56,7 @@ export class SkillsManager {
       return {
         id: skill.id,
         displayName: skill.manifest.displayName,
-        description: skill.description,
+        description: skill.manifest.description,
         category: skill.manifest.category,
         icon: skill.manifest.icon,
         version: skill.manifest.version || this.pluginVersion,

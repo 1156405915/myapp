@@ -4,7 +4,7 @@ import MarkdownContent from '@/components/MarkdownContent.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { useChatStore } from '@/stores/chat'
 import { useSkillsStore } from '@/stores/skills'
-import type { ChatMessage, ContentBlock } from '../../../shared/protocol'
+import type { ChatMessage, ContentBlock, MessageAttachment } from '../../../shared/protocol'
 
 const chat = useChatStore()
 const skills = useSkillsStore()
@@ -12,6 +12,11 @@ const message = ref('')
 const sending = ref(false)
 const copiedMessageId = ref<string | null>(null)
 const messageList = ref<HTMLElement | null>(null)
+const pendingAttachments = ref<MessageAttachment[]>([])
+const pendingSessionId = ref<string | null>(null)
+const importingAttachments = ref(false)
+const attachmentError = ref('')
+const dragActive = ref(false)
 const skillShortcuts = computed(() => {
   const enabled = skills.items.filter((skill) => skill.enabled && skill.available)
   return [...enabled.filter((skill) => skill.recommended), ...enabled.filter((skill) => !skill.recommended)].slice(0, 8)
@@ -32,6 +37,17 @@ watch(
   }
 )
 
+watch(
+  () => chat.activeSessionId,
+  async (sessionId) => {
+    if (!pendingSessionId.value || sessionId === pendingSessionId.value) return
+    const stale = [...pendingAttachments.value]
+    pendingAttachments.value = []
+    pendingSessionId.value = null
+    await Promise.all(stale.map((attachment) => window.mayi.attachments.discard(attachment.id).catch(() => undefined)))
+  }
+)
+
 /** 将快捷技能名称预填入输入框，保留用户继续补充需求的空间。 */
 function useSkill(id: string, displayName: string): void {
   message.value = `请使用 ${id}（${displayName}）技能帮我：`
@@ -40,14 +56,129 @@ function useSkill(id: string, displayName: string): void {
 /** 防止 IPC 提交阶段重复发送，并在成功提交后清空输入。 */
 async function submit(): Promise<void> {
   const prompt = message.value.trim()
-  if (!prompt || sending.value) return
+  if ((!prompt && pendingAttachments.value.length === 0) || sending.value || importingAttachments.value) return
   sending.value = true
   try {
-    await chat.send(prompt)
-    message.value = ''
+    const sent = await chat.send(prompt, pendingAttachments.value.map((attachment) => attachment.id))
+    if (sent) {
+      message.value = ''
+      pendingAttachments.value = []
+      pendingSessionId.value = null
+      attachmentError.value = ''
+    }
   } finally {
     sending.value = false
   }
+}
+
+/** 打开原生文件选择器，所有文件都由主进程复制和验证。 */
+async function chooseAttachments(): Promise<void> {
+  if (importingAttachments.value || pendingAttachments.value.length >= 10) return
+  importingAttachments.value = true
+  attachmentError.value = ''
+  const createdDraft = !chat.activeSessionId
+  try {
+    const sessionId = await chat.ensureDraftSession()
+    const attachments = await window.mayi.attachments.select(sessionId)
+    await appendAttachments(attachments)
+    if (attachments.length > 0) pendingSessionId.value = sessionId
+    if (createdDraft && attachments.length === 0) {
+      await chat.deleteSession(sessionId)
+      await chat.createNewSession()
+    }
+  } catch (reason) {
+    attachmentError.value = reason instanceof Error ? reason.message : String(reason)
+    if (createdDraft && chat.activeSessionId && pendingAttachments.value.length === 0) {
+      await chat.deleteSession(chat.activeSessionId).catch(() => undefined)
+      await chat.createNewSession()
+    }
+  } finally {
+    importingAttachments.value = false
+  }
+}
+
+/** 导入拖拽文件；真实路径只在 preload 中短暂解析。 */
+async function handleDrop(event: DragEvent): Promise<void> {
+  dragActive.value = false
+  const files = Array.from(event.dataTransfer?.files || [])
+  if (files.length === 0) return
+  importingAttachments.value = true
+  attachmentError.value = ''
+  try {
+    const sessionId = await chat.ensureDraftSession()
+    await appendAttachments(await window.mayi.attachments.importFiles(sessionId, files))
+    if (pendingAttachments.value.length > 0) pendingSessionId.value = sessionId
+  } catch (reason) {
+    attachmentError.value = reason instanceof Error ? reason.message : String(reason)
+  } finally {
+    importingAttachments.value = false
+  }
+}
+
+/** 普通文本粘贴保持浏览器默认行为，只接管剪贴板图片。 */
+async function handlePaste(event: ClipboardEvent): Promise<void> {
+  const images = Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith('image/'))
+  if (images.length === 0) return
+  event.preventDefault()
+  importingAttachments.value = true
+  attachmentError.value = ''
+  const imported: MessageAttachment[] = []
+  try {
+    const sessionId = await chat.ensureDraftSession()
+    for (const [index, file] of images.entries()) {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      imported.push(await window.mayi.attachments.importBytes({
+        sessionId,
+        name: file.name || `clipboard-image-${index + 1}.png`,
+        mimeType: file.type,
+        bytes
+      }))
+    }
+    await appendAttachments(imported)
+    if (imported.length > 0) pendingSessionId.value = sessionId
+  } catch (reason) {
+    await Promise.all(imported.map((attachment) => window.mayi.attachments.discard(attachment.id).catch(() => undefined)))
+    attachmentError.value = reason instanceof Error ? reason.message : String(reason)
+  } finally {
+    importingAttachments.value = false
+  }
+}
+
+/** 合并附件并执行界面侧数量上限，主进程仍会独立校验。 */
+async function appendAttachments(attachments: MessageAttachment[]): Promise<void> {
+  const remaining = 10 - pendingAttachments.value.length
+  if (attachments.length > remaining) {
+    attachmentError.value = '每条消息最多添加 10 个附件'
+    await Promise.all(attachments.slice(remaining).map((attachment) => window.mayi.attachments.discard(attachment.id)))
+  }
+  pendingAttachments.value.push(...attachments.slice(0, remaining))
+}
+
+/** 删除尚未发送的附件副本。 */
+async function removeAttachment(attachment: MessageAttachment): Promise<void> {
+  try {
+    await window.mayi.attachments.discard(attachment.id)
+    pendingAttachments.value = pendingAttachments.value.filter((item) => item.id !== attachment.id)
+    if (pendingAttachments.value.length === 0) pendingSessionId.value = null
+  } catch (reason) {
+    attachmentError.value = reason instanceof Error ? reason.message : String(reason)
+  }
+}
+
+/** 请求主进程按附件 ID 在资源管理器中定位受控副本。 */
+async function revealAttachment(attachmentId: string): Promise<void> {
+  try {
+    await window.mayi.attachments.reveal(attachmentId)
+  } catch (reason) {
+    attachmentError.value = reason instanceof Error ? reason.message : String(reason)
+  }
+}
+
+/** 将字节数格式化为附件卡片使用的紧凑文本。 */
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
 /** 支持 Enter 发送，同时避免中文输入法确认候选时误提交。 */
@@ -84,6 +215,7 @@ function messageText(item: ChatMessage): string {
       if (block.type === 'thinking') return block.thinking
       if (block.type === 'tool_use') return `${block.toolName}\n${JSON.stringify(block.input, null, 2)}`
       if (block.type === 'tool_result') return block.content
+      if (block.type === 'attachment') return `${block.attachment.name}\n${block.attachment.relativePath}`
       return block.message
     })
     .filter(Boolean)
@@ -120,7 +252,7 @@ function contextPercentage(item: ChatMessage): number {
       <div class="skill-shortcuts">
         <button v-for="skill in skillShortcuts" :key="skill.id" type="button" @click="useSkill(skill.id, skill.displayName)">
           <UiIcon :name="skill.icon" :size="34" />
-          <span><strong>{{ skill.displayName }}</strong><small>{{ skill.description }}</small></span>
+          <span><strong>{{ skill.displayName }}</strong><small :title="skill.description">{{ skill.description }}</small></span>
         </button>
       </div>
     </div>
@@ -137,6 +269,10 @@ function contextPercentage(item: ChatMessage): number {
             <template v-for="(block, blockIndex) in item.blocks" :key="`${item.id}-${blockIndex}`">
               <p v-if="item.role === 'user' && block.type === 'text'" class="user-message-text">{{ block.text }}</p>
               <MarkdownContent v-else-if="block.type === 'text'" :content="block.text" />
+              <button v-else-if="block.type === 'attachment'" type="button" class="message-attachment" @click="revealAttachment(block.attachment.id)">
+                <UiIcon :name="block.attachment.kind === 'image' ? 'image' : 'file'" :size="20" />
+                <span><strong>{{ block.attachment.name }}</strong><small>{{ block.attachment.mimeType }} · {{ formatFileSize(block.attachment.size) }}</small></span>
+              </button>
               <details v-else-if="block.type === 'thinking'" class="trace-block thinking-block">
                 <summary><UiIcon name="spark" :size="15" />Thinking</summary>
                 <p>{{ block.thinking }}</p>
@@ -182,14 +318,28 @@ function contextPercentage(item: ChatMessage): number {
     </div>
 
     <div class="chat-composer-wrap">
-      <p v-if="chat.error" class="chat-error">{{ chat.error }}</p>
-      <div class="composer">
-        <textarea v-model="message" rows="3" placeholder="给蚂蚁发送消息，Enter 发送，Shift+Enter 换行" @keydown="handleKeydown"></textarea>
+      <p v-if="chat.error || attachmentError" class="chat-error">{{ attachmentError || chat.error }}</p>
+      <div
+        class="composer"
+        :class="{ 'drag-active': dragActive }"
+        @dragenter.prevent="dragActive = true"
+        @dragover.prevent="dragActive = true"
+        @dragleave.prevent="dragActive = false"
+        @drop.prevent="handleDrop"
+      >
+        <div v-if="pendingAttachments.length" class="pending-attachments">
+          <div v-for="attachment in pendingAttachments" :key="attachment.id" class="pending-attachment">
+            <UiIcon :name="attachment.kind === 'image' ? 'image' : 'file'" :size="18" />
+            <span><strong>{{ attachment.name }}</strong><small>{{ formatFileSize(attachment.size) }}</small></span>
+            <button type="button" :aria-label="`移除 ${attachment.name}`" @click="removeAttachment(attachment)"><UiIcon name="close" :size="14" /></button>
+          </div>
+        </div>
+        <textarea v-model="message" rows="3" placeholder="给蚂蚁发送消息，支持拖入文件或粘贴图片" @keydown="handleKeydown" @paste="handlePaste"></textarea>
         <div class="composer-tools">
-          <button type="button" aria-label="添加附件" title="附件功能即将开放" disabled><UiIcon name="clip" /></button>
+          <button type="button" aria-label="添加附件" title="添加附件" :disabled="importingAttachments || pendingAttachments.length >= 10" @click="chooseAttachments"><UiIcon name="clip" /></button>
           <span v-if="chat.config" class="composer-context">{{ chat.config.model }} · {{ chat.config.cwd }}</span>
           <button v-if="chat.isRunning" class="stop-button" type="button" aria-label="停止" @click="chat.cancel">停止</button>
-          <button v-else class="send-button" type="button" aria-label="发送" :disabled="!message.trim() || sending" @click="submit"><UiIcon name="send" /></button>
+          <button v-else class="send-button" type="button" aria-label="发送" :disabled="(!message.trim() && !pendingAttachments.length) || sending || importingAttachments" @click="submit"><UiIcon name="send" /></button>
         </div>
       </div>
     </div>

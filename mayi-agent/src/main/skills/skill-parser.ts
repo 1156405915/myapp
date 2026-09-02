@@ -49,6 +49,7 @@ export function parseSkillDirectory(directory: string): DiscoveredSkill {
   const manifest: MayiSkillManifest = {
     id: typeof raw.id === 'string' ? raw.id.trim() : '',
     displayName: typeof raw.displayName === 'string' ? raw.displayName.trim() : '',
+    description: typeof raw.description === 'string' ? raw.description.trim() : '',
     category: typeof raw.category === 'string' ? raw.category.trim() : '',
     icon: typeof raw.icon === 'string' ? raw.icon.trim() : '',
     version: typeof raw.version === 'string' ? raw.version.trim() : '',
@@ -91,7 +92,14 @@ export function parseSkillDirectory(directory: string): DiscoveredSkill {
   if (manifest.id !== directoryId || manifest.id !== frontmatter.name) {
     throw new Error('目录名、SKILL.md name 与 mayi.json id 必须一致')
   }
-  if (!manifest.displayName || !manifest.category || !manifest.icon || !manifest.license) {
+  if (
+    !manifest.displayName ||
+    !manifest.description ||
+    !/[\u3400-\u9fff]/u.test(manifest.description) ||
+    !manifest.category ||
+    !manifest.icon ||
+    !manifest.license
+  ) {
     throw new Error('mayi.json 缺少展示元数据')
   }
   if (!VERSION_PATTERN.test(manifest.version)) throw new Error('mayi.json 的 version 无效')

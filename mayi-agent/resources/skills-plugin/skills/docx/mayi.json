@@ -1,6 +1,7 @@
 {
   "id": "docx",
   "displayName": "Word 文档处理",
+  "description": "读取、创建和编辑 Word 文档，支持批注、排版与交付校验。",
   "category": "artifact",
   "icon": "note",
   "version": "1.0.0",

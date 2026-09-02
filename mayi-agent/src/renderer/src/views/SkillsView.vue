@@ -53,7 +53,7 @@ onMounted(() => void skills.initialize())
       <div class="recommended-grid">
       <article v-for="skill in recommended" :key="skill.id" class="skill-card horizontal" :class="{ unavailable: !skill.available }">
         <UiIcon :name="skill.icon" :size="34" />
-        <div><strong>{{ skill.displayName }}</strong><p>{{ skill.description }}</p><small>{{ skill.enabled ? '已启用' : skill.available ? '未启用' : '不可用' }}</small></div>
+        <div><strong>{{ skill.displayName }}</strong><p :title="skill.description">{{ skill.description }}</p><small>{{ skill.enabled ? '已启用' : skill.available ? '未启用' : '不可用' }}</small></div>
         <button class="switch" :class="{ on: skill.enabled }" type="button" role="switch" :aria-checked="skill.enabled" :aria-label="`${skill.enabled ? '停用' : '启用'}${skill.displayName}`" :disabled="!skill.available || skills.savingIds.includes(skill.id)" @click="skills.setEnabled(skill.id, !skill.enabled)"><span></span></button>
       </article>
       </div>
@@ -64,7 +64,7 @@ onMounted(() => void skills.initialize())
       <article v-for="skill in filteredSkills" :key="skill.id" class="skill-card" :class="{ unavailable: !skill.available }">
         <span class="skill-version">v{{ skill.version }}</span>
         <UiIcon :name="skill.icon" :size="34" />
-        <strong>{{ skill.displayName }}</strong><p>{{ skill.description }}</p>
+        <strong>{{ skill.displayName }}</strong><p :title="skill.description">{{ skill.description }}</p>
         <div class="skill-meta"><span>{{ categoryLabel(skill.category) }}</span><span>{{ skill.sourceLabel }}</span></div>
         <div class="skill-dependency" :class="{ missing: !skill.available }">{{ dependencyText(skill) }}</div>
         <footer><small :class="{ enabled: skill.enabled }">{{ skill.enabled ? '已启用' : skill.available ? '未启用' : '不可用' }}</small><button class="switch" :class="{ on: skill.enabled }" type="button" role="switch" :aria-checked="skill.enabled" :aria-label="`${skill.enabled ? '停用' : '启用'}${skill.displayName}`" :disabled="!skill.available || skills.savingIds.includes(skill.id)" @click="skills.setEnabled(skill.id, !skill.enabled)"><span></span></button></footer>

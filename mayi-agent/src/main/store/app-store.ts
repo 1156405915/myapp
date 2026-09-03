@@ -44,6 +44,7 @@ interface SessionRow {
   title: string
   status: ChatSession['status']
   cwd: string
+  role_id: string | null
   runtime_session_id: string | null
   created_at: number
   updated_at: number
@@ -83,7 +84,7 @@ interface AttachmentRow {
   created_at: number
 }
 
-const DATABASE_VERSION = 3
+const DATABASE_VERSION = 4
 const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
 const DEEPSEEK_MODELS = new Set(['deepseek-v4-pro', 'deepseek-v4-flash'])
 
@@ -260,6 +261,12 @@ export class AppStore {
           CREATE INDEX IF NOT EXISTS idx_attachments_session_message
             ON attachments(session_id, message_id);
           PRAGMA user_version = 3;
+        `)
+      }
+      if (row.user_version < 4) {
+        this.database.exec(`
+          ALTER TABLE sessions ADD COLUMN role_id TEXT;
+          PRAGMA user_version = 4;
         `)
       }
     })
@@ -537,12 +544,13 @@ export class AppStore {
   saveSession(session: ChatSession): void {
     this.database
       .prepare(`
-        INSERT INTO sessions(id, title, status, cwd, runtime_session_id, created_at, updated_at)
-        VALUES(?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO sessions(id, title, status, cwd, role_id, runtime_session_id, created_at, updated_at)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           status = excluded.status,
           cwd = excluded.cwd,
+          role_id = excluded.role_id,
           runtime_session_id = excluded.runtime_session_id,
           updated_at = excluded.updated_at
       `)
@@ -551,6 +559,7 @@ export class AppStore {
         session.title,
         session.status,
         session.cwd,
+        session.roleId || null,
         session.runtimeSessionId || null,
         session.createdAt,
         session.updatedAt
@@ -640,6 +649,7 @@ export class AppStore {
       title: row.title,
       status: row.status,
       cwd: row.cwd,
+      roleId: row.role_id || undefined,
       runtimeSessionId: row.runtime_session_id || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at

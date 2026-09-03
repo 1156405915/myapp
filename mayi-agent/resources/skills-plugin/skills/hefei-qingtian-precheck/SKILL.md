@@ -5,6 +5,11 @@ description: Perform a pre-submission, evidence-based readiness review of constr
 
 # 合肥青天适配预审
 
+## 长任务执行
+
+- 全文评分覆盖扫描、跨文件一致性复核、DOCX/PDF 逐页检查和大规模雷同对比属于耗时任务。将检查阶段和报告写入 `.mayi/tasks/$MAYI_SESSION_ID/construction-plan/`，仅重跑输入发生变化或上次失败的阶段。
+- 预计超过两分钟的检查脚本使用 Bash `run_in_background: true`，保存 `task_id`，通过 `TaskOutput` 使用 `block: true`、`timeout: 30000` 等待；失败或不再需要时调用 `TaskStop`。
+
 1. 确认项目招标文件是否明确采用青天大模型、AI辅助评审或相关机制；未明确时只能按通用技术标质量预审，不得假定适用青天规则。
 2. 收集完整草案、`project-facts.json`、`scoring-matrix.json`、`requirement-traceability.json`、`construction-plan.json`、招标文件和全部补疑。没有草案且用户要求直接生成时，先调用 `construction-organization-design`。
 3. 阅读 [references/review-model.md](references/review-model.md) 和 [references/output-contract.md](references/output-contract.md)。招标文件明示规则始终高于本技能的通用检查维度。

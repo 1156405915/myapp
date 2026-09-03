@@ -5,6 +5,7 @@ export interface ChatSession {
   title: string
   status: SessionStatus
   cwd: string
+  roleId?: string
   runtimeSessionId?: string
   createdAt: number
   updatedAt: number
@@ -123,6 +124,14 @@ export interface SkillInfo {
   dependencies: SkillDependency[]
 }
 
+export interface RoleInfo {
+  id: string
+  displayName: string
+  description: string
+  icon: string
+  requiredSkillIds: string[]
+}
+
 export interface SetSkillEnabledInput {
   id: string
   enabled: boolean
@@ -142,6 +151,11 @@ export type ServerEvent =
 export interface StartSessionInput {
   prompt: string
   title?: string
+  roleId?: string
+}
+
+export interface CreateDraftSessionInput {
+  roleId?: string
 }
 
 export interface SendMessageInput {
@@ -174,7 +188,7 @@ export interface MayiApi {
     /** 创建会话并提交首条消息。 */
     create(input: StartSessionInput): Promise<ChatSession>
     /** 创建尚未发送消息的会话，用于先导入附件。 */
-    createDraft(): Promise<ChatSession>
+    createDraft(input?: CreateDraftSessionInput): Promise<ChatSession>
     /** 获取会话消息历史。 */
     messages(sessionId: string): Promise<ChatMessage[]>
     /** 向已有会话发送消息。 */
@@ -197,6 +211,10 @@ export interface MayiApi {
     list(): Promise<SkillInfo[]>
     /** 更新技能状态并返回最新权威列表。 */
     setEnabled(input: SetSkillEnabledInput): Promise<SkillInfo[]>
+  }
+  roles: {
+    /** 获取应用内置角色。 */
+    list(): Promise<RoleInfo[]>
   }
   attachments: {
     /** 使用原生选择器导入文件。 */

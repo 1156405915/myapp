@@ -22,6 +22,7 @@ interface RuntimeConfig {
   cwd: string
   enabledSkillIds: string[]
   skillsPluginPath: string
+  rolePrompt?: string
 }
 
 interface RunCallbacks {
@@ -46,12 +47,15 @@ const ENABLED_TOOLS = [
   'Glob',
   'Grep',
   'Bash',
+  'TaskOutput',
+  'TaskStop',
   'WebSearch',
   'WebFetch',
   'Skill'
 ]
 const AUTO_ALLOWED_TOOLS = ['WebSearch', 'WebFetch', 'Skill']
 const GUARDED_READ_TOOLS = new Set(['Read', 'Glob', 'Grep'])
+const BACKGROUND_TASK_TOOLS = new Set(['TaskOutput', 'TaskStop'])
 const IMAGE_ANALYSIS_MODEL = 'glm-5.3-flash'
 
 /** 优先使用进程代理，并兼容读取 Windows 当前用户的系统代理。 */
@@ -179,6 +183,11 @@ export class ClaudeAgentRunner {
               return { behavior: 'allow', toolUseID: options.toolUseID }
             }
 
+            if (BACKGROUND_TASK_TOOLS.has(toolName)) {
+              logInfo('后台任务控制工具已自动放行', { toolName })
+              return { behavior: 'allow', toolUseID: options.toolUseID }
+            }
+
             if (this.sessionAllowedTools.get(session.id)?.has(toolName)) {
               logInfo('工具通过本会话授权规则', { toolName })
               return { behavior: 'allow', toolUseID: options.toolUseID }
@@ -239,10 +248,13 @@ export class ClaudeAgentRunner {
             preset: 'claude_code',
             append:
               '你是蚂蚁企业级 AI 协作助手。默认使用中文，回答准确简洁；执行文件修改前先理解现有代码，完成后说明修改结果。' +
+              (config.rolePrompt ? `\n\n${config.rolePrompt}\n\n` : '') +
               '本地写入和 Bash 仅限当前会话固定的工作区；只读工具还可访问应用随附的技能资源目录。' +
               `本次任务可用 Skill 为：${config.enabledSkillIds.join('、') || '无'}。仅调用此列表中的 Skill，并严格遵循已调用 Skill 的完整工作流。` +
               '禁止用临时简陋脚本或 HTML 打印冒充用户要求的正式文件格式。生成表格时必须设置页面可用宽度、列宽、单元格换行、分页和重复表头。' +
               '交付前必须完成结构校验；PDF 必须逐页渲染检查，DOCX/PPTX 必须转换为 PDF 后逐页检查，XLSX 必须重算公式并确保零公式错误。' +
+              '预计超过两分钟的脚本不得以前台 Bash 方式等待：必须使用 run_in_background 启动，保存返回的 task_id，并通过 TaskOutput 阻塞查询结果；任务失败、无需继续或准备改用其他方案时使用 TaskStop。禁止用循环或 sleep 高频轮询。' +
+              '长任务必须按阶段写入工作区内的检查点和中间产物；开始前读取已有检查点，已完成阶段不得重复执行，失败后从最近完成阶段继续。' +
               '必须检查文字裁切、越界、重叠、乱码、空白页、表格溢出和打印区域。验证失败必须修复并重新生成；缺少验证依赖时不得声称文件已完成。'
           },
           env: {
@@ -259,6 +271,7 @@ export class ClaudeAgentRunner {
             CLAUDE_CODE_AUTO_COMPACT_WINDOW: '786432',
             CLAUDE_AGENT_SDK_CLIENT_APP: 'mayi-agent',
             MAYI_DOCUMENT_SKILLS_ROOT: join(documentSkillsPluginPath, 'skills'),
+            MAYI_SESSION_ID: session.id,
             ...(proxyUrl
               ? {
                   HTTP_PROXY: proxyUrl,

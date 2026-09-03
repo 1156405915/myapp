@@ -6,6 +6,11 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # Requirements for Outputs
 
+## Long-running operations
+
+- Large workbook processing, LibreOffice formula recalculation, chart generation, PDF export, and print-area validation are long-running operations. Save recalculated and rendered intermediate files so failed validation can resume without rebuilding the workbook.
+- If a command may take longer than two minutes, run Bash with `run_in_background: true`, retain the returned `task_id`, and wait with `TaskOutput` using `block: true` and `timeout: 30000`. Use `TaskStop` when abandoning a task; never poll with `sleep` loops.
+
 ## All Excel files
 
 ### Zero Formula Errors

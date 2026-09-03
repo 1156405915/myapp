@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type {
   AppConfigPatch,
   AttachmentBytesInput,
+  CreateDraftSessionInput,
   PermissionResponseInput,
   SendMessageInput,
   ServerEvent,
@@ -14,6 +15,7 @@ import { ClaudeAgentRunner } from './agent/claude-agent-runner'
 import { AttachmentManager } from './attachments/attachment-manager'
 import { SessionManager } from './session/session-manager'
 import { SkillsManager } from './skills/skills-manager'
+import { RolesManager } from './roles/roles-manager'
 import { AppStore } from './store/app-store'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
@@ -119,6 +121,7 @@ function registerIpc(
   store: AppStore,
   sessions: SessionManager,
   skills: SkillsManager,
+  roles: RolesManager,
   attachments: AttachmentManager
 ): void {
   /** 返回应用版本，不向渲染进程暴露 Electron 对象。 */
@@ -152,12 +155,12 @@ function registerIpc(
   /** 创建会话并提交首条提示。 */
   ipcMain.handle('sessions:create', (event, input: StartSessionInput) => {
     assertTrustedSender(event)
-    return sessions.createSession(input?.prompt, input?.title)
+    return sessions.createSession(input?.prompt, input?.title, input?.roleId)
   })
   /** 创建固定工作区的空会话，支持先添加附件再发送。 */
-  ipcMain.handle('sessions:create-draft', (event) => {
+  ipcMain.handle('sessions:create-draft', (event, input?: CreateDraftSessionInput) => {
     assertTrustedSender(event)
-    return sessions.createDraftSession()
+    return sessions.createDraftSession('新会话', input?.roleId)
   })
   /** 读取指定会话的消息历史。 */
   ipcMain.handle('sessions:messages', (event, sessionId: string) => {
@@ -210,6 +213,11 @@ function registerIpc(
     assertTrustedSender(event)
     if (!input || typeof input !== 'object') throw new Error('技能开关参数无效')
     return skills.setEnabled(input.id, input.enabled)
+  })
+  /** 返回主进程资源中定义的角色，不暴露角色系统提示词。 */
+  ipcMain.handle('roles:list', (event) => {
+    assertTrustedSender(event)
+    return roles.listRoles()
   })
   /** 使用原生多选文件对话框并直接导入受控副本，不返回原始绝对路径。 */
   ipcMain.handle('attachments:select', async (event, sessionId: string) => {
@@ -273,6 +281,7 @@ if (!hasSingleInstanceLock) {
     appStore = store
     const runner = new ClaudeAgentRunner()
     const skills = new SkillsManager(store)
+    const roles = new RolesManager()
     const attachments = new AttachmentManager(store)
     /** 将会话管理器事件单向转发给可信渲染进程。 */
     const sessions = new SessionManager(
@@ -282,9 +291,10 @@ if (!hasSingleInstanceLock) {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event)
       },
       skills,
+      roles,
       attachments
     )
-    registerIpc(store, sessions, skills, attachments)
+    registerIpc(store, sessions, skills, roles, attachments)
 
     /** macOS 从 Dock 激活且无窗口时重建主窗口。 */
     app.on('activate', () => {

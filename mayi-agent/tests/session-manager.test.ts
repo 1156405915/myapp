@@ -11,6 +11,7 @@ import { SessionManager } from '../src/main/session/session-manager'
 import type { AppStore } from '../src/main/store/app-store'
 import type { ClaudeAgentRunner } from '../src/main/agent/claude-agent-runner'
 import type { SkillsManager } from '../src/main/skills/skills-manager'
+import type { RolesManager } from '../src/main/roles/roles-manager'
 import type { AttachmentManager } from '../src/main/attachments/attachment-manager'
 
 interface Deferred<T> {
@@ -105,7 +106,7 @@ function createRunner(
         signal: AbortSignal
       ): Promise<PermissionDecision>
     },
-    config: { enabledSkillIds: string[]; skillsPluginPath: string }
+    config: { enabledSkillIds: string[]; skillsPluginPath: string; rolePrompt?: string }
   ) => Promise<AgentRunResult>
 ): ClaudeAgentRunner & { cancel: ReturnType<typeof vi.fn>; forgetSession: ReturnType<typeof vi.fn> } {
   const cancel = vi.fn()
@@ -133,8 +134,11 @@ function createManager(store: AppStore, runner: ClaudeAgentRunner): {
   const attachments = {
     deleteSessionFiles: vi.fn()
   } as unknown as AttachmentManager
+  const roles = {
+    getRole: vi.fn(() => undefined)
+  } as unknown as RolesManager
   return {
-    manager: new SessionManager(store, runner, (event) => events.push(event), skills, attachments),
+    manager: new SessionManager(store, runner, (event) => events.push(event), skills, roles, attachments),
     events
   }
 }
@@ -173,6 +177,7 @@ describe('SessionManager 会话队列', () => {
       runner,
       () => undefined,
       skills,
+      { getRole: vi.fn(() => undefined) } as unknown as RolesManager,
       { deleteSessionFiles: vi.fn() } as unknown as AttachmentManager
     )
 
@@ -182,6 +187,61 @@ describe('SessionManager 会话队列', () => {
     await vi.waitFor(() => expect(snapshots).toHaveLength(2))
 
     expect(snapshots).toEqual([['pdf'], ['pdf', 'document-summary']])
+  })
+
+  it('会话角色决定独立技能快照和工作流提示', async () => {
+    const store = createStore()
+    const captured: Array<{ skillIds: string[]; rolePrompt?: string }> = []
+    const skills = {
+      getRequiredSkillIds: vi.fn(() => ['construction-organization-design', 'image-analysis']),
+      getEnabledSkillIds: vi.fn(() => ['document-summary']),
+      getPluginPath: vi.fn(() => 'test-skills-plugin')
+    } as unknown as SkillsManager
+    const roles = {
+      getRole: vi.fn((roleId?: string) =>
+        roleId
+          ? {
+              id: roleId,
+              displayName: '施组编制专家',
+              description: '编制施工组织设计。',
+              icon: 'task',
+              requiredSkillIds: [
+                'construction-organization-design',
+                'hefei-qingtian-precheck',
+                'image-analysis'
+              ],
+              prompt: '执行施组编制工作流。',
+              schemaVersion: 1
+            }
+          : undefined
+      )
+    } as unknown as RolesManager
+    const runner = createRunner(async (_session, prompt, _callbacks, config) => {
+      captured.push({ skillIds: [...config.enabledSkillIds], rolePrompt: config.rolePrompt })
+      return successfulResult(prompt)
+    })
+    const manager = new SessionManager(
+      store,
+      runner,
+      () => undefined,
+      skills,
+      roles,
+      { deleteSessionFiles: vi.fn() } as unknown as AttachmentManager
+    )
+
+    const session = manager.createSession('编制施组', undefined, 'construction-organization-expert')
+    await vi.waitFor(() => expect(captured).toHaveLength(1))
+
+    expect(session.roleId).toBe('construction-organization-expert')
+    expect(skills.getRequiredSkillIds).toHaveBeenCalledWith([
+      'construction-organization-design',
+      'hefei-qingtian-precheck',
+      'image-analysis'
+    ])
+    expect(captured[0]).toEqual({
+      skillIds: ['construction-organization-design', 'image-analysis'],
+      rolePrompt: '执行施组编制工作流。'
+    })
   })
 
   it('同一会话严格串行执行提示', async () => {

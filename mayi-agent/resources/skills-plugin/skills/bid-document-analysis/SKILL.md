@@ -5,6 +5,11 @@ description: Analyze construction and public-procurement tender documents into p
 
 # 招标文件分析
 
+## 长任务执行
+
+- 批量读取招标文件、扫描件 OCR、跨文件证据索引和全量评分矩阵复核属于耗时任务。按资料文件和输出阶段保存中间 JSON，已完成且输入未变化的文件不得重复解析。
+- 预计超过两分钟的转换、OCR 或批处理脚本使用 Bash `run_in_background: true`，保存 `task_id`，通过 `TaskOutput` 使用 `block: true`、`timeout: 30000` 等待；失败或终止时调用 `TaskStop`。
+
 1. 先确认资料集是否包含招标文件正文、技术规范、工程量清单、图纸、合同条件、补疑和澄清；记录缺失项，不修改用户原文件。
 2. 调用 `information-extraction` 提取项目事实、工期、质量目标、建设范围、工程量、评分项、否决项、格式和暗标要求，并为每个值保留文件名、章节或页码证据。
 3. 阅读 [references/output-contract.md](references/output-contract.md)，建立 `project-facts.json`、`scoring-matrix.json` 和 `requirement-traceability.json`。下游需要正式施组时必须生成这些结构化成果。

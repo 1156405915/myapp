@@ -6,6 +6,11 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # PPTX creation, editing, and analysis
 
+## Long-running operations
+
+- Large presentation generation, LibreOffice conversion, full-slide rendering, thumbnail creation, and visual validation are long-running operations. Preserve slide batches and validation artifacts so interrupted work resumes from the last completed batch.
+- If a command may take longer than two minutes, run Bash with `run_in_background: true`, retain the returned `task_id`, and wait with `TaskOutput` using `block: true` and `timeout: 30000`. Use `TaskStop` when abandoning a task; never poll with `sleep` loops.
+
 ## Overview
 
 Create, edit, or analyze the contents of .pptx files when requested. A .pptx file is essentially a ZIP archive containing XML files and other resources. Different tools and workflows are available for different tasks.

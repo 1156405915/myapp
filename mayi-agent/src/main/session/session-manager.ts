@@ -19,6 +19,7 @@ import {
 } from '../logging/logger'
 import { AppStore } from '../store/app-store'
 import type { SkillsManager } from '../skills/skills-manager'
+import type { RolesManager } from '../roles/roles-manager'
 
 interface QueuedPrompt {
   prompt: string
@@ -45,6 +46,7 @@ export class SessionManager {
     private readonly runner: ClaudeAgentRunner,
     private readonly sendEvent: (event: ServerEvent) => void,
     private readonly skills: SkillsManager,
+    private readonly roles: RolesManager,
     private readonly attachments: AttachmentManager
   ) {}
 
@@ -60,23 +62,25 @@ export class SessionManager {
   }
 
   /** 创建会话、保存首条用户消息并立即加入执行队列。 */
-  createSession(prompt: string, title?: string): ChatSession {
+  createSession(prompt: string, title?: string, roleId?: string): ChatSession {
     const normalizedPrompt = this.normalizePrompt(prompt)
-    const session = this.createDraftSession(title || normalizedPrompt)
+    const session = this.createDraftSession(title || normalizedPrompt, roleId)
     this.addUserMessage(session.id, normalizedPrompt, [])
     this.enqueue(session.id, normalizedPrompt, [])
     return session
   }
 
   /** 创建固定工作区的空会话，允许在首条消息前安全导入附件。 */
-  createDraftSession(title = '新会话'): ChatSession {
+  createDraftSession(title = '新会话', roleId?: string): ChatSession {
     const now = Date.now()
     const config = this.store.getPublicConfig()
+    const role = this.roles.getRole(roleId)
     const session: ChatSession = {
       id: randomUUID(),
       title: this.normalizeTitle(title),
       status: 'idle',
       cwd: config.cwd,
+      roleId: role?.id,
       createdAt: now,
       updatedAt: now
     }
@@ -201,14 +205,18 @@ export class SessionManager {
   ): Promise<void> {
     try {
       logInfo('开始处理会话提示', { promptLength: prompt.length })
-      const enabledSkillIds = this.skills.getEnabledSkillIds()
+      const role = this.roles.getRole(session.roleId)
+      const enabledSkillIds = role
+        ? this.skills.getRequiredSkillIds(role.requiredSkillIds)
+        : this.skills.getEnabledSkillIds()
       const config = {
         ...this.store.getRuntimeConfig(),
         cwd: session.cwd,
         enabledSkillIds,
-        skillsPluginPath: this.skills.getPluginPath()
+        skillsPluginPath: this.skills.getPluginPath(),
+        rolePrompt: role?.prompt
       }
-      logInfo('已生成 Agent 技能快照', { skillIds: enabledSkillIds })
+      logInfo('已生成 Agent 技能快照', { roleId: role?.id, skillIds: enabledSkillIds })
       const result = await this.runner.run(session, prompt, config, {
         onDelta: (delta) => {
           this.sendEvent({ type: 'stream.delta', payload: { sessionId: session.id, delta } })

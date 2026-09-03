@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { useChatStore } from '@/stores/chat'
-import { useSkillsStore } from '@/stores/skills'
 import type { ChatMessage, ContentBlock, MessageAttachment } from '../../../shared/protocol'
 
 const chat = useChatStore()
-const skills = useSkillsStore()
 const message = ref('')
 const sending = ref(false)
 const copiedMessageId = ref<string | null>(null)
@@ -17,15 +15,10 @@ const pendingSessionId = ref<string | null>(null)
 const importingAttachments = ref(false)
 const attachmentError = ref('')
 const dragActive = ref(false)
-const skillShortcuts = computed(() => {
-  const enabled = skills.items.filter((skill) => skill.enabled && skill.available)
-  return [...enabled.filter((skill) => skill.recommended), ...enabled.filter((skill) => !skill.recommended)].slice(0, 8)
-})
 
 // ChatView 可能晚于布局挂载，store 会避免重复初始化和重复监听。
 onMounted(() => {
   void chat.initialize()
-  void skills.initialize()
 })
 
 // 仅观察影响列表高度的数据，并等待 DOM 更新后再滚动。
@@ -47,11 +40,6 @@ watch(
     await Promise.all(stale.map((attachment) => window.mayi.attachments.discard(attachment.id).catch(() => undefined)))
   }
 )
-
-/** 将快捷技能名称预填入输入框，保留用户继续补充需求的空间。 */
-function useSkill(id: string, displayName: string): void {
-  message.value = `请使用 ${id}（${displayName}）技能帮我：`
-}
 
 /** 防止 IPC 提交阶段重复发送，并在成功提交后清空输入。 */
 async function submit(): Promise<void> {
@@ -246,13 +234,21 @@ function contextPercentage(item: ChatMessage): number {
     <div v-if="chat.messages.length === 0 && !chat.streamingContent" class="chat-empty">
       <div class="welcome-copy">
         <h1>今天想完成什么？</h1>
-        <p>蚂蚁可以阅读办公文件、整理资料、审查内容并生成专业文档。</p>
+        <p>选择专业角色，上传项目资料后直接描述需要完成的工作。</p>
       </div>
-      <div class="skill-heading">已启用技能</div>
-      <div class="skill-shortcuts">
-        <button v-for="skill in skillShortcuts" :key="skill.id" type="button" @click="useSkill(skill.id, skill.displayName)">
-          <UiIcon :name="skill.icon" :size="34" />
-          <span><strong>{{ skill.displayName }}</strong><small :title="skill.description">{{ skill.description }}</small></span>
+      <div class="role-heading">选择角色</div>
+      <div class="role-shortcuts">
+        <button
+          v-for="role in chat.roles"
+          :key="role.id"
+          type="button"
+          :class="{ selected: chat.selectedRoleId === role.id }"
+          :aria-pressed="chat.selectedRoleId === role.id"
+          @click="chat.selectRole(role.id)"
+        >
+          <UiIcon :name="role.icon" :size="34" />
+          <span><strong>{{ role.displayName }}</strong><small :title="role.description">{{ role.description }}</small></span>
+          <em v-if="chat.selectedRoleId === role.id">已选择</em>
         </button>
       </div>
     </div>

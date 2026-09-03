@@ -79,6 +79,29 @@ describe('AppStore SQLite 持久化', () => {
     }
   })
 
+  it('持久化会话选择的角色', () => {
+    const directory = createTemporaryDirectory()
+    const now = Date.now()
+    const store = new AppStore(directory)
+    store.saveSession({
+      id: 'role-session',
+      title: '施组编制',
+      status: 'idle',
+      cwd: process.cwd(),
+      roleId: 'construction-organization-expert',
+      createdAt: now,
+      updatedAt: now
+    })
+    store.close()
+
+    const reopened = new AppStore(directory)
+    try {
+      expect(reopened.getSession('role-session')?.roleId).toBe('construction-organization-expert')
+    } finally {
+      reopened.close()
+    }
+  })
+
   it('将旧版 JSON 会话和纯文本消息事务迁移为结构化内容块', () => {
     const directory = createTemporaryDirectory()
     const now = Date.now()

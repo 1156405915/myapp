@@ -6,6 +6,11 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # DOCX creation, editing, and analysis
 
+## Long-running operations
+
+- Large document unpacking, full-document conversion through LibreOffice, PDF rendering, and page-by-page visual validation are long-running operations. Preserve intermediate DOCX/PDF files and validation results before continuing.
+- If a command may take longer than two minutes, run Bash with `run_in_background: true`, retain the returned `task_id`, and wait with `TaskOutput` using `block: true` and `timeout: 30000`. Use `TaskStop` when abandoning a task; never poll with `sleep` loops.
+
 ## Overview
 
 A .docx file is a ZIP archive containing XML files.

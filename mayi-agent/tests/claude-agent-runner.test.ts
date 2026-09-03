@@ -54,7 +54,8 @@ describe('ClaudeAgentRunner 技能白名单', () => {
         model: 'deepseek-v4-flash',
         cwd: process.cwd(),
         enabledSkillIds: ['pdf', 'document-summary'],
-        skillsPluginPath: resolve('resources/skills-plugin')
+        skillsPluginPath: resolve('resources/skills-plugin'),
+        rolePrompt: '执行施组编制工作流。'
       },
       {
         onDelta: vi.fn(),
@@ -65,8 +66,14 @@ describe('ClaudeAgentRunner 技能白名单', () => {
 
     expect(queryMock).toHaveBeenCalledOnce()
     expect(queryMock.mock.calls[0][0].options.model).toBe('deepseek-v4-flash')
+    expect(queryMock.mock.calls[0][0].options.tools).toEqual(
+      expect.arrayContaining(['Bash', 'TaskOutput', 'TaskStop'])
+    )
     expect(queryMock.mock.calls[0][0].options.skills).toEqual(['pdf', 'document-summary'])
     expect(queryMock.mock.calls[0][0].options.systemPrompt.append).toContain('pdf、document-summary')
+    expect(queryMock.mock.calls[0][0].options.systemPrompt.append).toContain('执行施组编制工作流。')
+    expect(queryMock.mock.calls[0][0].options.systemPrompt.append).toContain('run_in_background')
+    expect(queryMock.mock.calls[0][0].options.env.MAYI_SESSION_ID).toBe('session-id')
     expect(queryMock.mock.calls[0][0].options.env.ANTHROPIC_BASE_URL).toBe(
       'https://api.example.com/anthropic'
     )

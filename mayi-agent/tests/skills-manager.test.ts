@@ -95,6 +95,37 @@ describe('SkillsManager', () => {
     expect(store.states.pptx).toBe(false)
   })
 
+  it('为角色展开完整技能依赖且不修改全局开关', () => {
+    const store = createStore({
+      'hefei-qingtian-precheck': false,
+      'construction-organization-design': false,
+      'image-analysis': false
+    })
+    const manager = new SkillsManager(store, resolve('resources/skills-plugin'))
+
+    expect(
+      manager.getRequiredSkillIds(['hefei-qingtian-precheck', 'image-analysis'])
+    ).toEqual(
+      expect.arrayContaining([
+        'hefei-qingtian-precheck',
+        'construction-organization-design',
+        'bid-document-analysis',
+        'information-extraction',
+        'professional-writing',
+        'document-review',
+        'docx',
+        'pdf',
+        'xlsx',
+        'image-analysis'
+      ])
+    )
+    expect(store.states).toEqual({
+      'hefei-qingtian-precheck': false,
+      'construction-organization-design': false,
+      'image-analysis': false
+    })
+  })
+
   it('拒绝未知技能和无效参数', () => {
     const manager = new SkillsManager(createStore(), resolve('resources/skills-plugin'))
     expect(() => manager.setEnabled('unknown', true)).toThrow('技能不存在')

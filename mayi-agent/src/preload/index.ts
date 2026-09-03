@@ -4,10 +4,12 @@ import type {
   AttachmentBytesInput,
   ChatMessage,
   ChatSession,
+  CreateDraftSessionInput,
   MayiApi,
   MessageAttachment,
   PermissionResponseInput,
   PublicAppConfig,
+  RoleInfo,
   SendMessageInput,
   ServerEvent,
   SetSkillEnabledInput,
@@ -35,7 +37,8 @@ const api: MayiApi = {
     create: (input: StartSessionInput): Promise<ChatSession> =>
       ipcRenderer.invoke('sessions:create', input),
     /** 创建用于附件导入的空会话。 */
-    createDraft: (): Promise<ChatSession> => ipcRenderer.invoke('sessions:create-draft'),
+    createDraft: (input?: CreateDraftSessionInput): Promise<ChatSession> =>
+      ipcRenderer.invoke('sessions:create-draft', input),
     /** 获取指定会话的消息。 */
     messages: (sessionId: string): Promise<ChatMessage[]> =>
       ipcRenderer.invoke('sessions:messages', sessionId),
@@ -61,6 +64,10 @@ const api: MayiApi = {
     /** 更新技能开关，结果以主进程返回列表为准。 */
     setEnabled: (input: SetSkillEnabledInput): Promise<SkillInfo[]> =>
       ipcRenderer.invoke('skills:set-enabled', input)
+  },
+  roles: {
+    /** 获取主进程校验后的内置角色列表。 */
+    list: (): Promise<RoleInfo[]> => ipcRenderer.invoke('roles:list')
   },
   attachments: {
     /** 打开原生文件选择器并返回已安全复制的附件。 */

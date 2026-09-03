@@ -8,6 +8,7 @@ import type {
   PermissionDecision,
   PermissionRequest,
   PublicAppConfig,
+  RoleInfo,
   ServerEvent
 } from '../../../shared/protocol'
 
@@ -18,6 +19,8 @@ export const useChatStore = defineStore('chat', () => {
   const streamingContent = ref('')
   const activity = ref<AgentActivity | null>(null)
   const config = ref<PublicAppConfig | null>(null)
+  const roles = ref<RoleInfo[]>([])
+  const selectedRoleId = ref<string | null>(null)
   const permissionQueue = ref<PermissionRequest[]>([])
   const error = ref('')
   const initialized = ref(false)
@@ -40,12 +43,15 @@ export const useChatStore = defineStore('chat', () => {
     initializePromise = (async () => {
       unsubscribe = window.mayi.onEvent(handleEvent)
       try {
-        const [storedSessions, storedConfig] = await Promise.all([
+        const [storedSessions, storedConfig, availableRoles] = await Promise.all([
           window.mayi.sessions.list(),
-          window.mayi.config.get()
+          window.mayi.config.get(),
+          window.mayi.roles.list()
         ])
         sessions.value = storedSessions
         config.value = storedConfig
+        roles.value = availableRoles
+        selectedRoleId.value = availableRoles[0]?.id || null
         if (storedSessions[0]) await selectSession(storedSessions[0].id)
         initialized.value = true
       } catch (reason) {
@@ -60,6 +66,7 @@ export const useChatStore = defineStore('chat', () => {
   /** 切换活动会话并加载其持久化消息。 */
   async function selectSession(sessionId: string): Promise<void> {
     activeSessionId.value = sessionId
+    selectedRoleId.value = sessions.value.find((session) => session.id === sessionId)?.roleId || roles.value[0]?.id || null
     streamingContent.value = ''
     activity.value = null
     error.value = ''
@@ -87,7 +94,10 @@ export const useChatStore = defineStore('chat', () => {
         })
       } else {
         if (attachmentIds.length > 0) throw new Error('附件发送前必须先创建会话')
-        const session = await window.mayi.sessions.create({ prompt: text })
+        const session = await window.mayi.sessions.create({
+          prompt: text,
+          roleId: selectedRoleId.value || undefined
+        })
         activeSessionId.value = session.id
       }
       return true
@@ -101,7 +111,9 @@ export const useChatStore = defineStore('chat', () => {
   /** 确保附件导入前存在固定工作区的草稿会话。 */
   async function ensureDraftSession(): Promise<string> {
     if (activeSessionId.value) return activeSessionId.value
-    const session = await window.mayi.sessions.createDraft()
+    const session = await window.mayi.sessions.createDraft({
+      roleId: selectedRoleId.value || undefined
+    })
     activeSessionId.value = session.id
     return session.id
   }
@@ -121,6 +133,13 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent.value = ''
     activity.value = null
     error.value = ''
+    selectedRoleId.value = roles.value[0]?.id || null
+  }
+
+  /** 选择尚未创建会话所使用的角色。 */
+  function selectRole(roleId: string): void {
+    if (!roles.value.some((role) => role.id === roleId)) return
+    selectedRoleId.value = roleId
   }
 
   /** 请求主进程删除指定会话。 */
@@ -230,6 +249,8 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent,
     activity,
     config,
+    roles,
+    selectedRoleId,
     pendingPermission,
     error,
     initialized,
@@ -240,6 +261,7 @@ export const useChatStore = defineStore('chat', () => {
     ensureDraftSession,
     cancel,
     createNewSession,
+    selectRole,
     deleteSession,
     saveConfig,
     selectDirectory,

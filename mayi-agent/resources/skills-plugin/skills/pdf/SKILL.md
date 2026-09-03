@@ -6,6 +6,11 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # PDF Processing Guide
 
+## Long-running operations
+
+- Full-document OCR, batch page rendering, large merges, compression, and visual inspection are long-running operations. Save page-level or batch-level outputs so completed work can be reused after interruption.
+- If a command may take longer than two minutes, run Bash with `run_in_background: true`, retain the returned `task_id`, and wait with `TaskOutput` using `block: true` and `timeout: 30000`. Use `TaskStop` when abandoning a task; never poll with `sleep` loops.
+
 ## Overview
 
 This guide covers essential PDF processing operations using Python libraries and command-line tools. For advanced features, JavaScript libraries, and detailed examples, see REFERENCE.md. If you need to fill out a PDF form, read FORMS.md and follow its instructions.

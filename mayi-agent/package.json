@@ -55,6 +55,10 @@
       {
         "from": "resources/skills-plugin",
         "to": "skills-plugin"
+      },
+      {
+        "from": "resources/roles",
+        "to": "roles"
       }
     ],
     "asarUnpack": [

@@ -133,6 +133,23 @@ export class SkillsManager {
       .map((skill) => skill.id)
   }
 
+  /** 为角色生成独立技能快照，不修改全局技能开关。 */
+  getRequiredSkillIds(requiredSkillIds: string[]): string[] {
+    if (!Array.isArray(requiredSkillIds) || requiredSkillIds.length === 0) {
+      throw new Error('角色所需技能无效')
+    }
+    const definitions = this.loadDefinitions()
+    const definitionsById = new Map(definitions.map((definition) => [definition.id, definition]))
+    const availableIds = this.getAvailableIds(definitionsById)
+    const resolved = new Set<string>()
+    for (const id of requiredSkillIds) {
+      if (typeof id !== 'string' || !definitionsById.has(id)) throw new Error(`角色所需技能不存在：${id}`)
+      if (!availableIds.has(id)) throw new Error(`角色所需技能依赖不完整：${id}`)
+      this.visitDependencies(id, definitionsById, (dependencyId) => resolved.add(dependencyId))
+    }
+    return definitions.filter((definition) => resolved.has(definition.id)).map((definition) => definition.id)
+  }
+
   getPluginPath(): string {
     return this.pluginPath
   }

@@ -6,6 +6,13 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # PPTX creation, editing, and analysis
 
+## Runtime dependency bootstrap
+
+- Before conversion and slide rendering, verify `soffice --version` (or `soffice.com --version` on Windows) and `pdftoppm -v`.
+- If either command is missing, do not skip visual validation. Request permission to install only the missing package; on Windows use the exact WinGet packages `TheDocumentFoundation.LibreOffice` and `oschwartz10612.Poppler`, then verify again.
+- On Windows prefer `C:\Program Files\LibreOffice\program\soffice.com` for headless conversion and resolve a newly installed `pdftoppm.exe` from the WinGet package directory if the current shell has stale `PATH` state.
+- Never install system software without the user's explicit Bash permission.
+
 ## Long-running operations
 
 - Large presentation generation, LibreOffice conversion, full-slide rendering, thumbnail creation, and visual validation are long-running operations. Preserve slide batches and validation artifacts so interrupted work resumes from the last completed batch.

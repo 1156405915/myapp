@@ -6,6 +6,7 @@ export const useSkillsStore = defineStore('skills', () => {
   const items = ref<SkillInfo[]>([])
   const loading = ref(false)
   const savingIds = ref<string[]>([])
+  const installingIds = ref<string[]>([])
   const error = ref('')
   const initialized = ref(false)
   let initializePromise: Promise<void> | null = null
@@ -50,6 +51,19 @@ export const useSkillsStore = defineStore('skills', () => {
     }
   }
 
+  async function installDependencies(id: string): Promise<void> {
+    if (installingIds.value.includes(id)) return
+    installingIds.value = [...installingIds.value, id]
+    error.value = ''
+    try {
+      items.value = await window.mayi.skills.installDependencies({ id })
+    } catch (reason) {
+      setError(reason)
+    } finally {
+      installingIds.value = installingIds.value.filter((item) => item !== id)
+    }
+  }
+
   function setError(reason: unknown): void {
     error.value = reason instanceof Error ? reason.message : String(reason)
   }
@@ -58,11 +72,13 @@ export const useSkillsStore = defineStore('skills', () => {
     items,
     loading,
     savingIds,
+    installingIds,
     error,
     initialized,
     enabledCount,
     initialize,
     refresh,
-    setEnabled
+    setEnabled,
+    installDependencies
   }
 })

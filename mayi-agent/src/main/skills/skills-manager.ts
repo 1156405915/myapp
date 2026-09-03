@@ -6,6 +6,13 @@ import type { SkillDependency, SkillInfo } from '../../shared/protocol'
 import type { AppStore } from '../store/app-store'
 import { parseSkillDirectory } from './skill-parser'
 import type { DiscoveredSkill } from './skill-types'
+import {
+  canInstallCommandDependency,
+  clearResolvedCommandDependencies,
+  commandLabel,
+  installCommandDependencies,
+  resolveCommandDependency
+} from './command-dependencies'
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url))
 
@@ -19,10 +26,13 @@ export function getSkillsPluginPath(): string {
 export class SkillsManager {
   private definitions: DiscoveredSkill[] | null = null
   private pluginVersion = ''
+  private readonly commandStatuses = new Map<string, boolean>()
 
   constructor(
     private readonly store: AppStore,
-    private readonly pluginPath = getSkillsPluginPath()
+    private readonly pluginPath = getSkillsPluginPath(),
+    private readonly commandResolver: (id: string) => string | null = resolveCommandDependency,
+    private readonly commandInstaller: (ids: string[]) => Promise<void> = installCommandDependencies
   ) {}
 
   /** 汇总持久化开关，并将可用技能的依赖传递展开为最终启用状态。 */
@@ -40,6 +50,13 @@ export class SkillsManager {
     )
     const enabledIds = new Set<string>()
     const enabledBy = new Map<string, Set<string>>()
+    for (const definition of definitions) {
+      for (const id of definition.manifest.requires?.commands || []) {
+        if (!this.commandStatuses.has(id)) {
+          this.commandStatuses.set(id, Boolean(this.commandResolver(id)))
+        }
+      }
+    }
 
     for (const rootId of requestedIds) {
       if (!availableIds.has(rootId)) continue
@@ -65,10 +82,11 @@ export class SkillsManager {
         })),
         ...(skill.manifest.requires?.commands || []).map((id) => ({
           id,
-          label: id,
+          label: commandLabel(id),
           type: 'command' as const,
-          status: 'unknown' as const,
-          required: false
+          status: this.commandStatuses.get(id) ? ('available' as const) : ('missing' as const),
+          required: false,
+          installable: canInstallCommandDependency(id)
         }))
       ]
       const available = !dependencies.some(
@@ -154,9 +172,32 @@ export class SkillsManager {
     return this.pluginPath
   }
 
+  getMissingCommandIds(id: string): string[] {
+    const skill = this.listSkills().find((item) => item.id === id)
+    if (!skill) throw new Error('技能不存在')
+    return skill.dependencies
+      .filter((dependency) => dependency.type === 'command' && dependency.status === 'missing')
+      .map((dependency) => dependency.id)
+  }
+
+  async installDependencies(id: string): Promise<SkillInfo[]> {
+    const missing = this.getMissingCommandIds(id)
+    if (!missing.length) return this.listSkills()
+    if (missing.some((dependencyId) => !canInstallCommandDependency(dependencyId))) {
+      throw new Error('该技能包含当前系统无法自动安装的依赖')
+    }
+    await this.commandInstaller(missing)
+    clearResolvedCommandDependencies(missing)
+    for (const dependencyId of missing) this.commandStatuses.delete(dependencyId)
+    const remaining = missing.filter((dependencyId) => !this.commandResolver(dependencyId))
+    if (remaining.length) throw new Error(`安装后仍未检测到依赖：${remaining.map(commandLabel).join('、')}`)
+    return this.refresh()
+  }
+
   /** 清理资源缓存，供后续刷新或安装流程复用。 */
   refresh(): SkillInfo[] {
     this.definitions = null
+    this.commandStatuses.clear()
     return this.listSkills()
   }
 

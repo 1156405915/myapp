@@ -43,6 +43,12 @@ function dependencyText(skill: SkillInfo): string {
   return commands.length ? `运行时依赖：${commands.map((item) => item.label).join('、')}` : '无需额外依赖'
 }
 
+function canInstall(skill: SkillInfo): boolean {
+  return skill.dependencies.some(
+    (item) => item.type === 'command' && item.status === 'missing' && item.installable
+  )
+}
+
 onMounted(() => void skills.initialize())
 </script>
 
@@ -75,7 +81,8 @@ onMounted(() => void skills.initialize())
         <UiIcon :name="skill.icon" :size="34" />
         <strong>{{ skill.displayName }}</strong><p :title="skill.description">{{ skill.description }}</p>
         <div class="skill-meta"><span>{{ categoryLabel(skill.category) }}</span><span>{{ skill.sourceLabel }}</span></div>
-        <div class="skill-dependency" :class="{ missing: !skill.available }">{{ dependencyText(skill) }}</div>
+        <div class="skill-dependency" :class="{ missing: skill.dependencies.some((item) => item.status === 'missing') }">{{ dependencyText(skill) }}</div>
+        <button v-if="canInstall(skill)" class="dependency-install" type="button" :disabled="skills.installingIds.includes(skill.id)" @click="skills.installDependencies(skill.id)">{{ skills.installingIds.includes(skill.id) ? '正在安装…' : '安装缺失依赖' }}</button>
         <footer><small :class="{ enabled: skill.enabled }">{{ skill.enabled ? '已启用' : skill.available ? '未启用' : '不可用' }}</small><button class="switch" :class="{ on: skill.enabled }" type="button" role="switch" :aria-checked="skill.enabled" :aria-label="`${skill.enabled ? '停用' : '启用'}${skill.displayName}`" :disabled="!skill.available || skills.savingIds.includes(skill.id)" @click="skills.setEnabled(skill.id, !skill.enabled)"><span></span></button></footer>
       </article>
       </div>

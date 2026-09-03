@@ -9,6 +9,6 @@
   "recommended": false,
   "source": "builtin",
   "license": "Proprietary",
-  "requires": { "skills": [], "commands": ["node", "python", "libreoffice"] },
+  "requires": { "skills": [], "commands": ["node", "python", "libreoffice", "pdftoppm"] },
   "references": []
 }

@@ -6,6 +6,13 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # Requirements for Outputs
 
+## Runtime dependency bootstrap
+
+- Before formula recalculation, PDF export, or print validation, verify `soffice --version` (or `soffice.com --version` on Windows) and `pdftoppm -v` when page rendering is required.
+- If a required command is missing, request permission to install only the missing trusted package instead of skipping validation. On Windows use the exact WinGet packages `TheDocumentFoundation.LibreOffice` and `oschwartz10612.Poppler`, then verify again.
+- On Windows prefer `C:\Program Files\LibreOffice\program\soffice.com` for headless work and account for stale `PATH` state after installation.
+- Never install system software without the user's explicit Bash permission.
+
 ## Long-running operations
 
 - Large workbook processing, LibreOffice formula recalculation, chart generation, PDF export, and print-area validation are long-running operations. Save recalculated and rendered intermediate files so failed validation can resume without rebuilding the workbook.

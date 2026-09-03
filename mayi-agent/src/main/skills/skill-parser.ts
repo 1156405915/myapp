@@ -117,6 +117,13 @@ export function parseSkillDirectory(directory: string): DiscoveredSkill {
   if (new Set(requiredSkills).size !== requiredSkills.length) {
     throw new Error('requires.skills 不能包含重复技能 ID')
   }
+  const requiredCommands = manifest.requires?.commands || []
+  if (requiredCommands.some((id) => !SKILL_ID_PATTERN.test(id))) {
+    throw new Error('requires.commands 包含无效命令 ID')
+  }
+  if (new Set(requiredCommands).size !== requiredCommands.length) {
+    throw new Error('requires.commands 不能包含重复命令 ID')
+  }
 
   return { id: manifest.id, description: frontmatter.description, manifest }
 }

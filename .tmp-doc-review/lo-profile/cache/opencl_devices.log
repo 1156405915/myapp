@@ -1,0 +1,54 @@
+Device Index: 0
+  Selected: true
+  Device Name: GeForce GTX 960M
+  Device Vendor: NVIDIA Corporation
+  Device Version: OpenCL 1.2 CUDA
+  Driver Version: 382.64
+  Device Type: gpu 
+  Device Extensions: cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics cl_khr_fp64 cl_khr_byte_addressable_store cl_khr_icd cl_khr_gl_sharing cl_nv_compiler_options cl_nv_device_attribute_query cl_nv_pragma_unroll cl_nv_d3d10_sharing cl_khr_d3d10_sharing cl_nv_d3d11_sharing cl_nv_copy_opts cl_nv_create_buffer
+  Device OpenCL C Version: OpenCL C 1.2 
+  Device Available: true
+  Device Compiler Available: true
+  Device Linker Available: true
+  Platform Name: NVIDIA CUDA
+  Platform Vendor: NVIDIA Corporation
+  Platform Version: OpenCL 1.2 CUDA 8.0.0
+  Platform Profile: FULL_PROFILE
+  Platform Extensions: cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics cl_khr_fp64 cl_khr_byte_addressable_store cl_khr_icd cl_khr_gl_sharing cl_nv_compiler_options cl_nv_device_attribute_query cl_nv_pragma_unroll cl_nv_d3d10_sharing cl_khr_d3d10_sharing cl_nv_d3d11_sharing cl_nv_copy_opts cl_nv_create_buffer
+
+Device Index: 1
+  Selected: false
+  Device Name: Intel(R) HD Graphics 4600
+  Device Vendor: Intel(R) Corporation
+  Device Version: OpenCL 1.2 
+  Driver Version: 20.19.15.4624
+  Device Type: gpu 
+  Device Extensions: cl_intel_accelerator cl_intel_advanced_motion_estimation cl_intel_ctz cl_intel_d3d11_nv12_media_sharing cl_intel_dx9_media_sharing cl_intel_motion_estimation cl_intel_simultaneous_sharing cl_intel_subgroups cl_khr_3d_image_writes cl_khr_byte_addressable_store cl_khr_d3d10_sharing cl_khr_d3d11_sharing cl_khr_depth_images cl_khr_dx9_media_sharing cl_khr_gl_depth_images cl_khr_gl_event cl_khr_gl_msaa_sharing cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_gl_sharing cl_khr_icd cl_khr_image2d_from_buffer cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics cl_khr_spir 
+  Device OpenCL C Version: OpenCL C 1.2 
+  Device Available: true
+  Device Compiler Available: true
+  Device Linker Available: true
+  Platform Name: Intel(R) OpenCL
+  Platform Vendor: Intel(R) Corporation
+  Platform Version: OpenCL 1.2 
+  Platform Profile: FULL_PROFILE
+  Platform Extensions: cl_intel_dx9_media_sharing cl_khr_3d_image_writes cl_khr_byte_addressable_store cl_khr_d3d11_sharing cl_khr_depth_images cl_khr_dx9_media_sharing cl_khr_gl_sharing cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_icd cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics cl_khr_spir
+
+Device Index: 2
+  Selected: false
+  Device Name: Intel(R) Core(TM) i5-4210H CPU @ 2.90GHz
+  Device Vendor: Intel(R) Corporation
+  Device Version: OpenCL 1.2 (Build 10094)
+  Driver Version: 5.2.0.10094
+  Device Type: cpu 
+  Device Extensions: cl_khr_icd cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics cl_khr_byte_addressable_store cl_khr_depth_images cl_khr_3d_image_writes cl_intel_exec_by_local_thread cl_khr_spir cl_khr_dx9_media_sharing cl_intel_dx9_media_sharing cl_khr_d3d11_sharing cl_khr_gl_sharing cl_khr_fp64 
+  Device OpenCL C Version: OpenCL C 1.2 
+  Device Available: true
+  Device Compiler Available: true
+  Device Linker Available: true
+  Platform Name: Intel(R) OpenCL
+  Platform Vendor: Intel(R) Corporation
+  Platform Version: OpenCL 1.2 
+  Platform Profile: FULL_PROFILE
+  Platform Extensions: cl_intel_dx9_media_sharing cl_khr_3d_image_writes cl_khr_byte_addressable_store cl_khr_d3d11_sharing cl_khr_depth_images cl_khr_dx9_media_sharing cl_khr_gl_sharing cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_icd cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics cl_khr_spir
+

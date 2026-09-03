@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<profile>
+ <version>LibreOffice v1</version>
+ <device>
+  <type>opencl</type>
+  <name>GeForce GTX 960M</name>
+  <driver>382.64</driver>
+  <time>252057</time>
+  <errors>false</errors>
+ </device>
+ <device>
+  <type>opencl</type>
+  <name>Intel(R) HD Graphics 4600</name>
+  <driver>20.19.15.4624</driver>
+  <time>max</time>
+  <errors>false</errors>
+ </device>
+ <device>
+  <type>opencl</type>
+  <name>Intel(R) Core(TM) i5-4210H CPU @ 2.90GHz</name>
+  <driver>5.2.0.10094</driver>
+  <time>145163</time>
+  <errors>false</errors>
+ </device>
+ <device>
+  <type>native</type>
+  <time>4349952</time>
+  <errors>false</errors>
+ </device>
+</profile>

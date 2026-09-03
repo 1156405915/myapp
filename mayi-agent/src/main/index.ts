@@ -5,6 +5,7 @@ import type {
   AppConfigPatch,
   AttachmentBytesInput,
   CreateDraftSessionInput,
+  InstallSkillDependenciesInput,
   PermissionResponseInput,
   SendMessageInput,
   ServerEvent,
@@ -15,6 +16,7 @@ import { ClaudeAgentRunner } from './agent/claude-agent-runner'
 import { AttachmentManager } from './attachments/attachment-manager'
 import { SessionManager } from './session/session-manager'
 import { SkillsManager } from './skills/skills-manager'
+import { commandLabel } from './skills/command-dependencies'
 import { RolesManager } from './roles/roles-manager'
 import { AppStore } from './store/app-store'
 
@@ -213,6 +215,23 @@ function registerIpc(
     assertTrustedSender(event)
     if (!input || typeof input !== 'object') throw new Error('技能开关参数无效')
     return skills.setEnabled(input.id, input.enabled)
+  })
+  ipcMain.handle('skills:install-dependencies', async (event, input: InstallSkillDependenciesInput) => {
+    assertTrustedSender(event)
+    if (!input || typeof input.id !== 'string') throw new Error('技能依赖安装参数无效')
+    if (!mainWindow) throw new Error('主窗口不可用')
+    const missing = skills.getMissingCommandIds(input.id)
+    if (!missing.length) return skills.listSkills()
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      buttons: ['取消', '安装'],
+      defaultId: 1,
+      cancelId: 0,
+      title: '安装技能依赖',
+      message: '需要安装系统级文档处理组件',
+      detail: `即将通过系统程序包管理器安装：${missing.map(commandLabel).join('、')}。安装过程可能请求管理员权限。`
+    })
+    return result.response === 1 ? skills.installDependencies(input.id) : skills.listSkills()
   })
   /** 返回主进程资源中定义的角色，不暴露角色系统提示词。 */
   ipcMain.handle('roles:list', (event) => {

@@ -6,6 +6,15 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # DOCX creation, editing, and analysis
 
+## Runtime dependency bootstrap
+
+- Before using Pandoc, LibreOffice, or Poppler, verify `pandoc --version`, `soffice --version` (or `soffice.com --version` on Windows), and `pdftoppm -v`.
+- When a required command is missing, do not skip visual validation or immediately report that validation could not run. Request permission to install only the missing trusted package, then verify it again.
+- On Windows use `winget install --id JohnMacFarlane.Pandoc --exact`, `winget install --id TheDocumentFoundation.LibreOffice --exact`, and `winget install --id oschwartz10612.Poppler --exact` as needed. Include the package/source agreement flags for unattended execution.
+- After installing LibreOffice on Windows, prefer `C:\Program Files\LibreOffice\program\soffice.com` because the console entry waits for conversion and returns the real exit code.
+- After installing Poppler, start a new shell or resolve `pdftoppm.exe` from the WinGet package directory before concluding that installation failed.
+- Never install system software without the user's explicit Bash permission.
+
 ## Long-running operations
 
 - Large document unpacking, full-document conversion through LibreOffice, PDF rendering, and page-by-page visual validation are long-running operations. Preserve intermediate DOCX/PDF files and validation results before continuing.

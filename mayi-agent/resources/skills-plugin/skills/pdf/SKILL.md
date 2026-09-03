@@ -6,6 +6,13 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # PDF Processing Guide
 
+## Runtime dependency bootstrap
+
+- Before page rendering, verify `pdftoppm -v`.
+- If it is missing, do not skip page-by-page validation. Request permission and install Poppler; on Windows use `winget install --id oschwartz10612.Poppler --exact` with the package/source agreement flags, then verify `pdftoppm` again.
+- A newly installed Windows command may require a new shell or resolution from the WinGet package directory.
+- Never install system software without the user's explicit Bash permission.
+
 ## Long-running operations
 
 - Full-document OCR, batch page rendering, large merges, compression, and visual inspection are long-running operations. Save page-level or batch-level outputs so completed work can be reused after interruption.

@@ -104,6 +104,7 @@ export interface SkillDependency {
   type: 'skill' | 'command'
   status: SkillDependencyStatus
   required: boolean
+  installable?: boolean
 }
 
 export interface SkillInfo {
@@ -135,6 +136,10 @@ export interface RoleInfo {
 export interface SetSkillEnabledInput {
   id: string
   enabled: boolean
+}
+
+export interface InstallSkillDependenciesInput {
+  id: string
 }
 
 export type ServerEvent =
@@ -211,6 +216,8 @@ export interface MayiApi {
     list(): Promise<SkillInfo[]>
     /** 更新技能状态并返回最新权威列表。 */
     setEnabled(input: SetSkillEnabledInput): Promise<SkillInfo[]>
+    /** 安装指定技能缺失的受支持系统依赖。 */
+    installDependencies(input: InstallSkillDependenciesInput): Promise<SkillInfo[]>
   }
   roles: {
     /** 获取应用内置角色。 */

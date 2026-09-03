@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatSession,
   CreateDraftSessionInput,
+  InstallSkillDependenciesInput,
   MayiApi,
   MessageAttachment,
   PermissionResponseInput,
@@ -63,7 +64,9 @@ const api: MayiApi = {
     list: (): Promise<SkillInfo[]> => ipcRenderer.invoke('skills:list'),
     /** 更新技能开关，结果以主进程返回列表为准。 */
     setEnabled: (input: SetSkillEnabledInput): Promise<SkillInfo[]> =>
-      ipcRenderer.invoke('skills:set-enabled', input)
+      ipcRenderer.invoke('skills:set-enabled', input),
+    installDependencies: (input: InstallSkillDependenciesInput): Promise<SkillInfo[]> =>
+      ipcRenderer.invoke('skills:install-dependencies', input)
   },
   roles: {
     /** 获取主进程校验后的内置角色列表。 */

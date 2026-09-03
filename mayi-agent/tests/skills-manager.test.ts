@@ -18,7 +18,10 @@ afterEach(() => {
   }
 })
 
-function createPlugin(dependencies: Record<string, string[]>): string {
+function createPlugin(
+  dependencies: Record<string, string[]>,
+  commandDependencies: Record<string, string[]> = {}
+): string {
   const root = mkdtempSync(join(tmpdir(), 'mayi-skills-manager-'))
   temporaryDirectories.push(root)
   mkdirSync(join(root, '.claude-plugin'), { recursive: true })
@@ -48,7 +51,7 @@ function createPlugin(dependencies: Record<string, string[]>): string {
         defaultEnabled: true,
         source: 'builtin',
         license: 'Test',
-        requires: { skills: requiredSkills, commands: [] },
+        requires: { skills: requiredSkills, commands: commandDependencies[id] || [] },
         references: []
       }),
       'utf8'
@@ -171,5 +174,44 @@ describe('SkillsManager', () => {
     const manager = new SkillsManager(createStore(), pluginPath)
 
     expect(() => manager.listSkills()).toThrow('技能依赖存在循环：skill-a -> skill-b -> skill-a')
+  })
+
+  it('探测并展示命令依赖的真实状态', () => {
+    const pluginPath = createPlugin({ 'skill-a': [] }, { 'skill-a': ['pandoc', 'pdftoppm'] })
+    const manager = new SkillsManager(
+      createStore(),
+      pluginPath,
+      (id) => (id === 'pandoc' ? 'C:\\Tools\\pandoc.exe' : null)
+    )
+
+    const dependencies = manager.listSkills()[0].dependencies
+    expect(dependencies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'pandoc', status: 'available' }),
+        expect.objectContaining({ id: 'pdftoppm', status: 'missing' })
+      ])
+    )
+    expect(manager.getMissingCommandIds('skill-a')).toEqual(['pdftoppm'])
+  })
+
+  it.runIf(process.platform === 'win32')('安装缺失依赖后重新探测', async () => {
+    const pluginPath = createPlugin({ 'skill-a': [] }, { 'skill-a': ['pandoc'] })
+    let installed = false
+    const installer = vi.fn(async () => {
+      installed = true
+    })
+    const manager = new SkillsManager(
+      createStore(),
+      pluginPath,
+      () => (installed ? 'C:\\Tools\\pandoc.exe' : null),
+      installer
+    )
+
+    const skills = await manager.installDependencies('skill-a')
+
+    expect(installer).toHaveBeenCalledWith(['pandoc'])
+    expect(skills[0].dependencies).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'pandoc', status: 'available' })])
+    )
   })
 })

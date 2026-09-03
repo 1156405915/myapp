@@ -6,7 +6,12 @@ import { parseSkillDirectory, parseSkillFrontmatter } from '../src/main/skills/s
 
 const temporaryDirectories: string[] = []
 
-function createSkillDirectory(id: string, manifestId = id, requiredSkills: string[] = []): string {
+function createSkillDirectory(
+  id: string,
+  manifestId = id,
+  requiredSkills: string[] = [],
+  requiredCommands: string[] = []
+): string {
   const root = mkdtempSync(join(tmpdir(), 'mayi-skill-'))
   temporaryDirectories.push(root)
   const directory = join(root, id)
@@ -28,7 +33,7 @@ function createSkillDirectory(id: string, manifestId = id, requiredSkills: strin
       defaultEnabled: true,
       source: 'builtin',
       license: 'Test',
-      requires: { skills: requiredSkills, commands: [] },
+      requires: { skills: requiredSkills, commands: requiredCommands },
       references: []
     }),
     'utf8'
@@ -66,5 +71,14 @@ describe('Skill 解析', () => {
     expect(() =>
       parseSkillDirectory(createSkillDirectory('demo-skill', 'demo-skill', ['pdf', 'pdf']))
     ).toThrow('requires.skills 不能包含重复技能 ID')
+  })
+
+  it('拒绝重复或非法命令依赖', () => {
+    expect(() =>
+      parseSkillDirectory(createSkillDirectory('demo-skill', 'demo-skill', [], ['pandoc', 'pandoc']))
+    ).toThrow('requires.commands 不能包含重复命令 ID')
+    expect(() =>
+      parseSkillDirectory(createSkillDirectory('demo-skill', 'demo-skill', [], ['pandoc --version']))
+    ).toThrow('requires.commands 包含无效命令 ID')
   })
 })

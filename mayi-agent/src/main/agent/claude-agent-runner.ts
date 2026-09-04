@@ -13,6 +13,12 @@ import type {
   TokenUsage
 } from '../../shared/protocol'
 import { logError, logInfo, logWarn } from '../logging/logger'
+import type { ConstructionKnowledgeService } from '../knowledge/construction-knowledge-service'
+import {
+  createConstructionKnowledgeServer,
+  getConstructionKnowledgeToolNames,
+  KNOWLEDGE_SERVER_NAME,
+} from '../knowledge/construction-knowledge-tools'
 import { validateToolUse, validateWorkspacePath, validateWorkspaceRoot } from '../security/workspace-guard'
 
 interface RuntimeConfig {
@@ -98,6 +104,8 @@ export class ClaudeAgentRunner {
   private readonly controllers = new Map<string, AbortController>()
   private readonly sessionAllowedTools = new Map<string, Set<string>>()
 
+  constructor(private readonly knowledge?: ConstructionKnowledgeService) {}
+
   /** 启动可恢复的 Agent 流式任务，并汇总最终回复和用量。 */
   async run(
     session: ChatSession,
@@ -133,6 +141,10 @@ export class ClaudeAgentRunner {
         : config.model
     const proxyUrl = getProxyUrl()
     const documentSkillsPluginPath = config.skillsPluginPath
+    const knowledgeTools = this.knowledge
+      ? getConstructionKnowledgeToolNames(config.enabledSkillIds)
+      : []
+    const knowledgeEnabled = knowledgeTools.length > 0
     const manifestPath = join(documentSkillsPluginPath, '.claude-plugin', 'plugin.json')
     if (!existsSync(manifestPath)) throw new Error(`文档技能资源缺失：${manifestPath}`)
     if (!Array.isArray(config.enabledSkillIds) || config.enabledSkillIds.some((id) => typeof id !== 'string')) {
@@ -157,8 +169,8 @@ export class ClaudeAgentRunner {
           includePartialMessages: true,
           maxTurns: 30,
           permissionMode: 'default',
-          tools: ENABLED_TOOLS,
-          allowedTools: AUTO_ALLOWED_TOOLS,
+          tools: [...ENABLED_TOOLS, ...knowledgeTools],
+          allowedTools: [...AUTO_ALLOWED_TOOLS, ...knowledgeTools],
           canUseTool: async (toolName, input, options) => {
             const toolInput = input as Record<string, unknown>
             const security = validateToolUse(toolName, toolInput, config.cwd, [
@@ -239,6 +251,17 @@ export class ClaudeAgentRunner {
               skipMcpDiscovery: true
             }
           ],
+          ...(knowledgeEnabled && this.knowledge
+            ? {
+                mcpServers: {
+                  [KNOWLEDGE_SERVER_NAME]: createConstructionKnowledgeServer(
+                    this.knowledge,
+                    session.id,
+                    config.enabledSkillIds
+                  )
+                }
+              }
+            : {}),
           // 白名单与禁用 MCP 自动发现共同保证安装包只加载内置办公技能。
           skills: config.enabledSkillIds,
           // 禁止用户目录或项目目录中的 Claude 配置改变应用安全策略。

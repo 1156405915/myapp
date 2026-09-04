@@ -17,7 +17,11 @@ describe('RolesManager', () => {
         displayName: '施组编制专家',
         description: '读取招标文件、图纸、清单和项目材料，编制、校验并交付施工组织设计。',
         icon: 'task',
-        requiredSkillIds: ['hefei-qingtian-precheck', 'image-analysis']
+        requiredSkillIds: [
+          'construction-organization-design',
+          'hefei-qingtian-precheck',
+          'image-analysis'
+        ]
       }
     ])
     expect(manager.listRoles()[0]).not.toHaveProperty('prompt')
@@ -27,6 +31,7 @@ describe('RolesManager', () => {
     const manager = new RolesManager(resolve('resources/roles'))
 
     expect(manager.getRole('construction-organization-expert')?.prompt).toContain('施组编制专家')
+    expect(manager.getRole('construction-organization-expert')?.prompt).toContain('八阶段工作流')
     expect(() => manager.getRole('unknown-role')).toThrow('角色不存在')
     expect(() => manager.getRole('../role')).toThrow('角色 ID 无效')
   })

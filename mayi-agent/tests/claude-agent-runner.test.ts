@@ -3,9 +3,22 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }))
+const { queryMock, createSdkMcpServerMock, toolMock } = vi.hoisted(() => ({
+  queryMock: vi.fn(),
+  createSdkMcpServerMock: vi.fn((options) => ({ ...options, type: 'sdk', instance: {} })),
+  toolMock: vi.fn((name, description, inputSchema, handler) => ({
+    name,
+    description,
+    inputSchema,
+    handler
+  }))
+}))
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: queryMock }))
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: queryMock,
+  createSdkMcpServer: createSdkMcpServerMock,
+  tool: toolMock
+}))
 vi.mock('../src/main/logging/logger', () => ({
   logError: vi.fn(),
   logInfo: vi.fn(),
@@ -164,5 +177,78 @@ describe('ClaudeAgentRunner 技能白名单', () => {
     })
     expect(queryMock.mock.calls[0][0].options.model).toBe('glm-5.3-flash')
     expect(queryMock.mock.calls[0][0].options.env.ANTHROPIC_MODEL).toBe('glm-5.3-flash')
+  })
+
+  it('仅在标准登记技能启用时注入会话绑定的知识工具', async () => {
+    queryMock.mockImplementation(() =>
+      (async function* () {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'runtime-session',
+          result: '完成',
+          modelUsage: { 'test-model': {} },
+          usage: { input_tokens: 1, output_tokens: 1 },
+          total_cost_usd: 0,
+          duration_ms: 1
+        }
+      })()
+    )
+    const knowledge = {
+      queryStandard: vi.fn(),
+      createProjectSnapshot: vi.fn(),
+      getLatestProjectSnapshot: vi.fn()
+    }
+    const runner = new ClaudeAgentRunner(knowledge as never)
+
+    await runner.run(
+      {
+        id: 'knowledge-session',
+        title: '标准查询',
+        status: 'idle',
+        cwd: process.cwd(),
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      },
+      '查询标准',
+      {
+        apiKey: 'test-key',
+        baseUrl: 'https://api.example.com/anthropic',
+        model: 'deepseek-v4-flash',
+        cwd: process.cwd(),
+        enabledSkillIds: [
+          'construction-standard-registry',
+          'municipal-construction-methods',
+          'construction-standard-validation'
+        ],
+        skillsPluginPath: resolve('resources/skills-plugin')
+      },
+      { onDelta: vi.fn(), onActivity: vi.fn(), onPermission: vi.fn() }
+    )
+
+    const options = queryMock.mock.calls.at(-1)[0].options
+    expect(options.mcpServers).toHaveProperty('mayi-construction-knowledge')
+    expect(options.allowedTools).toEqual(
+      expect.arrayContaining([
+        'mcp__mayi-construction-knowledge__query_standard',
+        'mcp__mayi-construction-knowledge__create_project_standard_snapshot',
+        'mcp__mayi-construction-knowledge__latest_project_standard_snapshot',
+        'mcp__mayi-construction-knowledge__query_method_cards',
+        'mcp__mayi-construction-knowledge__create_project_method_snapshot',
+        'mcp__mayi-construction-knowledge__latest_project_method_snapshot',
+        'mcp__mayi-construction-knowledge__validate_standard_references',
+        'mcp__mayi-construction-knowledge__list_project_knowledge_impacts'
+      ])
+    )
+    expect(toolMock.mock.calls.map((call) => call[0])).toEqual([
+      'query_standard',
+      'create_project_standard_snapshot',
+      'latest_project_standard_snapshot',
+      'query_method_cards',
+      'create_project_method_snapshot',
+      'latest_project_method_snapshot',
+      'validate_standard_references',
+      'list_project_knowledge_impacts'
+    ])
   })
 })

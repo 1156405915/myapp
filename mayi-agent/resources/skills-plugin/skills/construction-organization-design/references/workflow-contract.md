@@ -26,13 +26,19 @@
       "name": "施工准备",
       "zoneId": "Z01",
       "durationDays": 15,
-      "predecessors": [],
+      "predecessors": [
+        { "id": "W00", "type": "FS", "lagDays": 0 }
+      ],
       "labor": 20,
-      "equipment": ["挖掘机1台"]
+      "equipment": ["挖掘机1台"],
+      "materials": [
+        { "name": "级配碎石", "quantity": 1000, "unit": "t" }
+      ]
     }
   ],
   "schedule": {
     "totalDurationDays": 365,
+    "calculatedDurationDays": 350,
     "criticalPath": ["W01"],
     "milestones": [{ "name": "开工", "day": 1 }]
   },
@@ -48,7 +54,9 @@
 }
 ```
 
-`project` 中的字段必须来自 `project-facts.json`。WBS、横道图、网络图、劳动力和机械计划从本文件生成，不得分别手填互相独立的数据。
+任务可以直接提供 `durationDays`，也可以提供 `quantity`、`productivityPerCrewDay` 和 `crews`，由 `construction-schedule-planning` 按 `ceil(quantity / (productivityPerCrewDay × crews))` 推算并记录依据。前置关系支持 FS、SS、FF、SF 和 `lagDays`。
+
+`project` 中的字段必须来自 `project-facts.json`。WBS、横道图、网络图、劳动力和机械计划从本文件生成，不得分别手填互相独立的数据。`project.durationDays` 是目标工期，`schedule.calculatedDurationDays` 是逻辑网络计算值，不得相互覆盖。
 
 ## consistency-ledger.json
 

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "municipal-traffic-facility-installation",
+  "version": "1.0.0",
+  "name": "交通设施安装与联调",
+  "discipline": "traffic",
+  "tags": ["sign", "signal", "monitoring"],
+  "applicableFactIds": ["entity.traffic"],
+  "excludedFactIds": [],
+  "requiredFactIds": ["design.traffic-layout", "design.foundation-detail", "interface.power-communication"],
+  "workflow": [
+    { "id": "W01", "name": "点位复核与基础施工" },
+    { "id": "W02", "name": "预埋件和管线检查" },
+    { "id": "W03", "name": "杆件与设备吊装" },
+    { "id": "W04", "name": "接线、单机测试和系统联调" },
+    { "id": "W05", "name": "功能验收与资料移交" }
+  ],
+  "controlPoints": [
+    { "id": "CP01", "name": "基础和预埋件参数", "sourceType": "design", "required": true },
+    { "id": "CP02", "name": "系统接口和联调要求", "sourceType": "project", "required": true }
+  ],
+  "laborRoles": ["起重指挥人员", "安装人员", "电气调试人员", "交通疏导人员"],
+  "equipmentTypes": ["起重设备", "高处作业设备", "电气测试设备"],
+  "qualityEvidence": ["基础验收记录", "设备开箱记录", "绝缘测试记录", "联调记录"],
+  "safetyRisks": ["起重吊装", "高处作业", "临时交通冲突", "带电调试"],
+  "environmentalControls": ["包装分类回收", "夜间调试噪声控制"],
+  "sourceRefs": [],
+  "prohibitedAssumptions": ["不得假设设备型号", "不得假设通信协议", "不得虚构产权接口条件"],
+  "reviewStatus": "reviewed",
+  "reviewedAt": "2026-09-04"
+}

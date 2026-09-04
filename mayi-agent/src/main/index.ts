@@ -5,11 +5,15 @@ import type {
   AppConfigPatch,
   AttachmentBytesInput,
   CreateDraftSessionInput,
+  CreateProjectStandardSnapshotInput,
   InstallSkillDependenciesInput,
+  ManualStandardImport,
   PermissionResponseInput,
+  ReviewStandardInput,
   SendMessageInput,
   ServerEvent,
   SetSkillEnabledInput,
+  StandardQueryInput,
   StartSessionInput
 } from '../shared/protocol'
 import { ClaudeAgentRunner } from './agent/claude-agent-runner'
@@ -17,6 +21,7 @@ import { AttachmentManager } from './attachments/attachment-manager'
 import { SessionManager } from './session/session-manager'
 import { SkillsManager } from './skills/skills-manager'
 import { commandLabel } from './skills/command-dependencies'
+import { ConstructionKnowledgeService } from './knowledge/construction-knowledge-service'
 import { RolesManager } from './roles/roles-manager'
 import { AppStore } from './store/app-store'
 
@@ -124,7 +129,8 @@ function registerIpc(
   sessions: SessionManager,
   skills: SkillsManager,
   roles: RolesManager,
-  attachments: AttachmentManager
+  attachments: AttachmentManager,
+  knowledge: ConstructionKnowledgeService
 ): void {
   /** 返回应用版本，不向渲染进程暴露 Electron 对象。 */
   ipcMain.handle('app:version', (event) => {
@@ -238,6 +244,34 @@ function registerIpc(
     assertTrustedSender(event)
     return roles.listRoles()
   })
+  /** 导入结构化标准元数据；内容哈希和待审核状态由主进程生成。 */
+  ipcMain.handle('knowledge:import-standard', (event, input: ManualStandardImport) => {
+    assertTrustedSender(event)
+    return knowledge.importStandard(input)
+  })
+  /** 更新标准核验状态，不向 Agent 暴露该能力。 */
+  ipcMain.handle('knowledge:review-standard', (event, input: ReviewStandardInput) => {
+    assertTrustedSender(event)
+    if (!input || typeof input !== 'object') throw new Error('标准审核参数无效')
+    return knowledge.reviewStandard(input.versionId, input.status)
+  })
+  /** 执行本地优先、官方白名单回退的标准查询。 */
+  ipcMain.handle('knowledge:query-standard', (event, input: StandardQueryInput) => {
+    assertTrustedSender(event)
+    return knowledge.queryStandard(input)
+  })
+  /** 创建绑定会话持久化工作区的不可变标准快照。 */
+  ipcMain.handle(
+    'knowledge:create-project-snapshot',
+    (event, input: CreateProjectStandardSnapshotInput) => {
+      assertTrustedSender(event)
+      return knowledge.createProjectSnapshot(input)
+    }
+  )
+  ipcMain.handle('knowledge:latest-project-snapshot', (event, sessionId: string) => {
+    assertTrustedSender(event)
+    return knowledge.getLatestProjectSnapshot(sessionId)
+  })
   /** 使用原生多选文件对话框并直接导入受控副本，不返回原始绝对路径。 */
   ipcMain.handle('attachments:select', async (event, sessionId: string) => {
     assertTrustedSender(event)
@@ -298,8 +332,12 @@ if (!hasSingleInstanceLock) {
     mainWindow = createWindow()
     const store = new AppStore()
     appStore = store
-    const runner = new ClaudeAgentRunner()
     const skills = new SkillsManager(store)
+    const knowledge = new ConstructionKnowledgeService(store)
+    knowledge.loadBuiltinMethodCards(
+      join(skills.getPluginPath(), 'skills', 'municipal-construction-methods', 'cards')
+    )
+    const runner = new ClaudeAgentRunner(knowledge)
     const roles = new RolesManager()
     const attachments = new AttachmentManager(store)
     /** 将会话管理器事件单向转发给可信渲染进程。 */
@@ -313,7 +351,7 @@ if (!hasSingleInstanceLock) {
       roles,
       attachments
     )
-    registerIpc(store, sessions, skills, roles, attachments)
+    registerIpc(store, sessions, skills, roles, attachments, knowledge)
 
     /** macOS 从 Dock 激活且无窗口时重建主窗口。 */
     app.on('activate', () => {

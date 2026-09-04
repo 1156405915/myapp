@@ -1,3 +1,15 @@
+import type {
+  CreateProjectStandardSnapshotInput,
+  ManualStandardImport,
+  ProjectStandardSnapshot,
+  StandardQueryInput,
+  StandardQueryResult,
+  StandardVerificationStatus,
+  StandardVersion
+} from './knowledge-types'
+
+export type * from './knowledge-types'
+
 export type SessionStatus = 'idle' | 'running' | 'error'
 
 export interface ChatSession {
@@ -176,6 +188,11 @@ export interface AttachmentBytesInput {
   bytes: Uint8Array
 }
 
+export interface ReviewStandardInput {
+  versionId: string
+  status: StandardVerificationStatus
+}
+
 export interface MayiApi {
   /** 获取应用版本。 */
   getVersion(): Promise<string>
@@ -222,6 +239,18 @@ export interface MayiApi {
   roles: {
     /** 获取应用内置角色。 */
     list(): Promise<RoleInfo[]>
+  }
+  knowledge: {
+    /** 导入结构化官方标准元数据，默认进入待审核状态。 */
+    importStandard(input: ManualStandardImport): Promise<StandardVersion>
+    /** 由可信界面更新标准核验状态。 */
+    reviewStandard(input: ReviewStandardInput): Promise<StandardVersion>
+    /** 按项目适用日期查询本地缓存并按策略尝试官方来源。 */
+    queryStandard(input: StandardQueryInput): Promise<StandardQueryResult>
+    /** 创建当前会话绑定的不可变项目标准快照。 */
+    createProjectSnapshot(input: CreateProjectStandardSnapshotInput): Promise<ProjectStandardSnapshot>
+    /** 读取当前会话最近一次标准快照。 */
+    latestProjectSnapshot(sessionId: string): Promise<ProjectStandardSnapshot | undefined>
   }
   attachments: {
     /** 使用原生选择器导入文件。 */

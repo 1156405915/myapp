@@ -1,0 +1,17 @@
+{
+  "id": "construction-schedule-planning",
+  "displayName": "施工计划计算",
+  "description": "计算施工WBS、关键线路、工期闭合和人材机资源峰值。",
+  "category": "construction",
+  "icon": "task",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Mayi Internal",
+  "requires": {
+    "skills": [],
+    "commands": ["node"]
+  },
+  "references": []
+}

@@ -11,6 +11,12 @@ const criticalFiles = [
   'skills/pptx/html2pptx.tgz',
   'skills/pptx/ooxml/scripts/validate.py',
   'skills/xlsx/recalc.py',
+  'skills/construction-intake/scripts/inventory.mjs',
+  'skills/construction-schedule-planning/scripts/calculate-schedule.mjs',
+  'skills/construction-standard-registry/references/project-standard-snapshot.schema.json',
+  'skills/municipal-construction-methods/references/method-card.schema.json',
+  'skills/municipal-construction-methods/cards/road/subgrade.json',
+  'skills/construction-standard-validation/SKILL.md',
   'skills/hefei-qingtian-precheck/scripts/check-consistency.mjs'
 ]
 

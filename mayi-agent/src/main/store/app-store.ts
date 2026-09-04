@@ -84,7 +84,7 @@ interface AttachmentRow {
   created_at: number
 }
 
-const DATABASE_VERSION = 4
+const DATABASE_VERSION = 8
 const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
 const DEEPSEEK_MODELS = new Set(['deepseek-v4-pro', 'deepseek-v4-flash'])
 
@@ -269,6 +269,314 @@ export class AppStore {
           PRAGMA user_version = 4;
         `)
       }
+      if (row.user_version < 5) {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS standard_registry (
+            id TEXT PRIMARY KEY,
+            normalized_code TEXT NOT NULL,
+            display_code TEXT NOT NULL,
+            title TEXT NOT NULL,
+            level TEXT NOT NULL CHECK(level IN (
+              'national', 'industry', 'anhui', 'hefei', 'group', 'enterprise'
+            )),
+            jurisdiction_json TEXT NOT NULL,
+            disciplines_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(normalized_code, jurisdiction_json)
+          );
+          CREATE TABLE IF NOT EXISTS standard_versions (
+            id TEXT PRIMARY KEY,
+            standard_id TEXT NOT NULL REFERENCES standard_registry(id),
+            status TEXT NOT NULL CHECK(status IN (
+              'active', 'revised', 'superseded', 'abolished', 'unknown'
+            )),
+            mandatory_nature TEXT NOT NULL CHECK(mandatory_nature IN (
+              'mandatory', 'recommended', 'partially-mandatory', 'unknown'
+            )),
+            verification_status TEXT NOT NULL CHECK(verification_status IN (
+              'discovered', 'pending_review', 'verified_official', 'approved',
+              'superseded', 'abolished', 'rejected'
+            )),
+            publish_date TEXT,
+            effective_date TEXT,
+            abolished_date TEXT,
+            replaces_json TEXT NOT NULL DEFAULT '[]',
+            replaced_by_json TEXT NOT NULL DEFAULT '[]',
+            official_source_id TEXT NOT NULL,
+            official_source_url TEXT NOT NULL,
+            full_text_access TEXT NOT NULL CHECK(full_text_access IN (
+              'public', 'licensed', 'metadata-only'
+            )),
+            source_hash TEXT NOT NULL,
+            checked_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(standard_id, effective_date, source_hash)
+          );
+          CREATE TABLE IF NOT EXISTS standard_queries (
+            id TEXT PRIMARY KEY,
+            query_key TEXT NOT NULL UNIQUE,
+            normalized_code TEXT NOT NULL,
+            jurisdiction TEXT NOT NULL,
+            discipline TEXT,
+            applicable_date TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            result_status TEXT NOT NULL CHECK(result_status IN ('found', 'not_found', 'failed')),
+            resolved_version_id TEXT REFERENCES standard_versions(id),
+            response_hash TEXT,
+            response_summary_json TEXT,
+            queried_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            error_code TEXT
+          );
+          CREATE TABLE IF NOT EXISTS project_standard_snapshots (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            workspace_canonical_path TEXT NOT NULL,
+            applicable_date TEXT NOT NULL,
+            mode TEXT NOT NULL CHECK(mode IN ('draft', 'formal')),
+            revision INTEGER NOT NULL,
+            snapshot_json TEXT NOT NULL,
+            snapshot_hash TEXT NOT NULL,
+            artifact_relative_path TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(project_id, revision),
+            UNIQUE(session_id, snapshot_hash)
+          );
+          CREATE TABLE IF NOT EXISTS project_standard_snapshot_items (
+            snapshot_id TEXT NOT NULL REFERENCES project_standard_snapshots(id) ON DELETE CASCADE,
+            version_id TEXT NOT NULL REFERENCES standard_versions(id),
+            selection_reason TEXT NOT NULL CHECK(selection_reason IN (
+              'tender', 'design', 'mandatory', 'regional', 'method'
+            )),
+            verification_status TEXT NOT NULL,
+            verified_at INTEGER NOT NULL,
+            PRIMARY KEY(snapshot_id, version_id, selection_reason)
+          );
+          CREATE INDEX IF NOT EXISTS idx_standard_version_applicable
+            ON standard_versions(standard_id, effective_date, abolished_date, verification_status);
+          CREATE INDEX IF NOT EXISTS idx_standard_version_checked
+            ON standard_versions(checked_at);
+          CREATE INDEX IF NOT EXISTS idx_standard_query_expiry
+            ON standard_queries(query_key, expires_at);
+          CREATE INDEX IF NOT EXISTS idx_project_snapshot_session
+            ON project_standard_snapshots(session_id, revision DESC);
+          PRAGMA user_version = 5;
+        `)
+      }
+      if (row.user_version < 6) {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS method_cards (
+            id TEXT PRIMARY KEY,
+            discipline TEXT NOT NULL,
+            name TEXT NOT NULL,
+            builtin INTEGER NOT NULL CHECK(builtin IN (0, 1)),
+            current_version_id TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS method_card_versions (
+            id TEXT PRIMARY KEY,
+            method_card_id TEXT NOT NULL REFERENCES method_cards(id),
+            schema_version INTEGER NOT NULL,
+            version TEXT NOT NULL,
+            content_json TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            review_status TEXT NOT NULL CHECK(review_status IN (
+              'draft', 'reviewed', 'approved', 'retired', 'rejected'
+            )),
+            source_kind TEXT NOT NULL CHECK(source_kind IN ('builtin', 'enterprise', 'project')),
+            reviewed_at TEXT,
+            created_at INTEGER NOT NULL,
+            UNIQUE(method_card_id, version, content_hash)
+          );
+          CREATE TABLE IF NOT EXISTS method_standard_refs (
+            method_version_id TEXT NOT NULL REFERENCES method_card_versions(id) ON DELETE CASCADE,
+            standard_version_id TEXT REFERENCES standard_versions(id),
+            normalized_code TEXT NOT NULL,
+            clause_ref TEXT NOT NULL DEFAULT '',
+            purpose TEXT NOT NULL CHECK(purpose IN ('constraint', 'quality', 'safety', 'acceptance', 'test')),
+            required INTEGER NOT NULL CHECK(required IN (0, 1)),
+            resolution_status TEXT NOT NULL CHECK(resolution_status IN ('resolved', 'unresolved', 'conflicting')),
+            PRIMARY KEY(method_version_id, normalized_code, clause_ref, purpose)
+          );
+          CREATE TABLE IF NOT EXISTS project_method_snapshots (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            created_by_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+            revision INTEGER NOT NULL,
+            facts_hash TEXT NOT NULL,
+            standard_snapshot_id TEXT REFERENCES project_standard_snapshots(id),
+            mode TEXT NOT NULL CHECK(mode IN ('draft', 'formal')),
+            snapshot_json TEXT NOT NULL,
+            snapshot_hash TEXT NOT NULL,
+            artifact_relative_path TEXT NOT NULL,
+            artifact_state TEXT NOT NULL CHECK(artifact_state IN ('pending', 'ready', 'missing', 'hash_mismatch')),
+            created_at INTEGER NOT NULL,
+            UNIQUE(project_id, revision),
+            UNIQUE(project_id, snapshot_hash)
+          );
+          CREATE TABLE IF NOT EXISTS project_method_snapshot_items (
+            snapshot_id TEXT NOT NULL REFERENCES project_method_snapshots(id) ON DELETE CASCADE,
+            method_version_id TEXT NOT NULL REFERENCES method_card_versions(id),
+            selection_reason TEXT NOT NULL CHECK(selection_reason IN ('entity', 'risk', 'tender', 'design', 'user')),
+            PRIMARY KEY(snapshot_id, method_version_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_method_cards_discipline ON method_cards(discipline);
+          CREATE INDEX IF NOT EXISTS idx_method_versions_status ON method_card_versions(review_status);
+          CREATE INDEX IF NOT EXISTS idx_method_refs_code ON method_standard_refs(normalized_code);
+          CREATE INDEX IF NOT EXISTS idx_project_method_snapshot_project
+            ON project_method_snapshots(project_id, revision DESC);
+          PRAGMA user_version = 6;
+        `)
+      }
+      if (row.user_version < 7) {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS official_sync_runs (
+            id TEXT PRIMARY KEY,
+            provider_id TEXT NOT NULL,
+            scope_json TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('running', 'succeeded', 'partial', 'failed')),
+            discovered_count INTEGER NOT NULL DEFAULT 0,
+            not_found_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            started_at INTEGER NOT NULL,
+            finished_at INTEGER,
+            error_summary TEXT
+          );
+          CREATE TABLE IF NOT EXISTS official_source_records (
+            id TEXT PRIMARY KEY,
+            sync_run_id TEXT REFERENCES official_sync_runs(id) ON DELETE SET NULL,
+            provider_id TEXT NOT NULL,
+            record_type TEXT NOT NULL CHECK(record_type IN (
+              'catalog', 'announcement', 'amendment', 'abolition', 'replacement', 'document'
+            )),
+            external_id TEXT NOT NULL,
+            requested_url TEXT NOT NULL,
+            final_url TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            content_length INTEGER NOT NULL,
+            response_hash TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            review_status TEXT NOT NULL CHECK(review_status IN ('pending_review', 'approved', 'rejected')),
+            fetched_at INTEGER NOT NULL,
+            UNIQUE(provider_id, external_id, response_hash)
+          );
+          CREATE TABLE IF NOT EXISTS standard_documents (
+            id TEXT PRIMARY KEY,
+            standard_version_id TEXT NOT NULL REFERENCES standard_versions(id),
+            document_type TEXT NOT NULL CHECK(document_type IN (
+              'official_fulltext', 'amendment', 'announcement', 'explanation'
+            )),
+            access_type TEXT NOT NULL CHECK(access_type IN ('public', 'licensed', 'metadata-only')),
+            source_record_id TEXT REFERENCES official_source_records(id),
+            media_type TEXT NOT NULL,
+            byte_size INTEGER NOT NULL,
+            content_hash TEXT NOT NULL,
+            storage_key TEXT,
+            parse_status TEXT NOT NULL CHECK(parse_status IN (
+              'not_requested', 'pending', 'parsed', 'unsupported', 'failed'
+            )),
+            created_at INTEGER NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS standard_clauses (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL REFERENCES standard_documents(id) ON DELETE CASCADE,
+            clause_type TEXT NOT NULL CHECK(clause_type IN (
+              'chapter', 'section', 'clause', 'table', 'appendix', 'explanation'
+            )),
+            clause_no TEXT NOT NULL,
+            title TEXT,
+            text TEXT NOT NULL,
+            page_start INTEGER,
+            page_end INTEGER,
+            content_hash TEXT NOT NULL,
+            review_status TEXT NOT NULL CHECK(review_status IN ('pending_review', 'approved', 'rejected')),
+            UNIQUE(document_id, clause_no, content_hash)
+          );
+          CREATE INDEX IF NOT EXISTS idx_official_records_review
+            ON official_source_records(review_status, fetched_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_standard_clauses_number
+            ON standard_clauses(document_id, clause_no);
+          PRAGMA user_version = 7;
+        `)
+      }
+      if (row.user_version < 8) {
+        this.database.exec(`
+          ALTER TABLE project_standard_snapshots
+            ADD COLUMN artifact_state TEXT NOT NULL DEFAULT 'ready'
+            CHECK(artifact_state IN ('pending', 'ready', 'missing', 'hash_mismatch'));
+          CREATE TABLE IF NOT EXISTS standard_validation_runs (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+            input_hash TEXT NOT NULL,
+            standard_snapshot_id TEXT REFERENCES project_standard_snapshots(id),
+            status TEXT NOT NULL CHECK(status IN ('passed', 'warnings', 'blocked')),
+            report_json TEXT NOT NULL,
+            artifact_relative_path TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS standard_validation_issues (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES standard_validation_runs(id) ON DELETE CASCADE,
+            rule_code TEXT NOT NULL,
+            severity TEXT NOT NULL CHECK(severity IN ('blocking', 'high', 'medium', 'low')),
+            status TEXT NOT NULL CHECK(status IN ('open', 'resolved', 'accepted')),
+            reference_index INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            suggestion TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS knowledge_impacts (
+            id TEXT PRIMARY KEY,
+            project_id TEXT,
+            trigger_type TEXT NOT NULL CHECK(trigger_type IN ('standard_status', 'standard_version', 'method_card')),
+            trigger_entity_id TEXT NOT NULL,
+            target_type TEXT NOT NULL CHECK(target_type IN (
+              'method_card', 'project_standard_snapshot', 'project_method_snapshot'
+            )),
+            target_id TEXT NOT NULL,
+            impact_type TEXT NOT NULL CHECK(impact_type IN ('revalidate', 'reselect', 'regenerate', 'review_only')),
+            severity TEXT NOT NULL CHECK(severity IN ('high', 'medium', 'low')),
+            reason TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('open', 'acknowledged', 'resolved', 'not_applicable')),
+            detected_at INTEGER NOT NULL,
+            resolved_at INTEGER,
+            UNIQUE(trigger_type, trigger_entity_id, target_type, target_id, impact_type, status)
+          );
+          CREATE TABLE IF NOT EXISTS knowledge_reviews (
+            id TEXT PRIMARY KEY,
+            entity_type TEXT NOT NULL CHECK(entity_type IN ('standard_version', 'method_version', 'official_record')),
+            entity_id TEXT NOT NULL,
+            previous_status TEXT,
+            decision TEXT NOT NULL,
+            reviewer_type TEXT NOT NULL CHECK(reviewer_type IN ('user', 'builtin_release', 'system')),
+            reason TEXT NOT NULL,
+            evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+            created_at INTEGER NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS knowledge_retrieval_events (
+            id TEXT PRIMARY KEY,
+            project_id TEXT,
+            session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+            query_type TEXT NOT NULL CHECK(query_type IN ('standard', 'method', 'reference_validation')),
+            query_hash TEXT NOT NULL,
+            filters_json TEXT NOT NULL,
+            candidate_ids_json TEXT NOT NULL,
+            selected_ids_json TEXT NOT NULL DEFAULT '[]',
+            zero_result INTEGER NOT NULL CHECK(zero_result IN (0, 1)),
+            latency_ms INTEGER NOT NULL,
+            manual_override INTEGER NOT NULL DEFAULT 0 CHECK(manual_override IN (0, 1)),
+            feedback TEXT NOT NULL DEFAULT 'unknown' CHECK(feedback IN ('relevant', 'partial', 'irrelevant', 'unknown')),
+            created_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_validation_project ON standard_validation_runs(project_id, created_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_impacts_project_status ON knowledge_impacts(project_id, status, detected_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_retrieval_type_created ON knowledge_retrieval_events(query_type, created_at DESC);
+          PRAGMA user_version = 8;
+        `)
+      }
     })
     logInfo('SQLite 数据库迁移完成', { version: DATABASE_VERSION })
   }
@@ -367,6 +675,16 @@ export class AppStore {
     } finally {
       this.transactionDepth -= 1
     }
+  }
+
+  /** 仅供受信主进程仓储准备参数化语句，不向渲染器或 Agent 暴露。 */
+  prepareInternal(sql: string): ReturnType<DatabaseConnection['prepare']> {
+    return this.database.prepare(sql)
+  }
+
+  /** 允许受信主进程领域服务复用数据库原子事务。 */
+  runInTransaction<T>(operation: () => T): T {
+    return this.transaction(operation)
   }
 
   /** 读取单项配置值。 */

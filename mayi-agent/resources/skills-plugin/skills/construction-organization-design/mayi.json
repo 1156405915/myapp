@@ -11,7 +11,13 @@
   "license": "Mayi Internal",
   "requires": {
     "skills": [
+      "construction-intake",
       "bid-document-analysis",
+      "construction-standard-registry",
+      "municipal-construction-methods",
+      "construction-standard-validation",
+      "document-comparison",
+      "construction-schedule-planning",
       "professional-writing",
       "document-review",
       "docx",

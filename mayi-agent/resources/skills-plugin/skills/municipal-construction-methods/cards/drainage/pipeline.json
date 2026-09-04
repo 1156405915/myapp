@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "municipal-drainage-pipeline-construction",
+  "version": "1.0.0",
+  "name": "市政排水管道施工",
+  "discipline": "drainage",
+  "tags": ["trench", "pipeline", "drainage"],
+  "applicableFactIds": ["entity.drainage", "work.pipeline"],
+  "excludedFactIds": [],
+  "requiredFactIds": ["design.pipeline-material", "design.pipeline-elevation", "site.geology", "site.groundwater"],
+  "workflow": [
+    { "id": "W01", "name": "管线复核与沟槽放样" },
+    { "id": "W02", "name": "支护降排水与沟槽开挖" },
+    { "id": "W03", "name": "基底验槽与管道基础" },
+    { "id": "W04", "name": "管道安装和接口施工" },
+    { "id": "W05", "name": "检查井施工与功能试验" },
+    { "id": "W06", "name": "分层回填与恢复" }
+  ],
+  "controlPoints": [
+    { "id": "CP01", "name": "沟槽支护与降排水参数", "sourceType": "project", "required": true },
+    { "id": "CP02", "name": "管底高程与坡度", "sourceType": "design", "required": true },
+    { "id": "CP03", "name": "接口和试验要求", "sourceType": "design", "required": true }
+  ],
+  "laborRoles": ["测量人员", "管道安装人员", "试验人员", "安全管理人员"],
+  "equipmentTypes": ["挖掘机", "起重设备", "降排水设备", "夯实设备"],
+  "qualityEvidence": ["验槽记录", "隐蔽验收记录", "高程复测记录", "功能性试验记录"],
+  "safetyRisks": ["沟槽坍塌", "地下水突涌", "吊装伤害", "有限空间作业"],
+  "environmentalControls": ["泥浆和积水受控处置", "土方覆盖", "噪声时段控制"],
+  "sourceRefs": [],
+  "prohibitedAssumptions": ["不得假设地下水位", "不得假设支护形式", "不得假设管材接口形式"],
+  "reviewStatus": "reviewed",
+  "reviewedAt": "2026-09-04"
+}

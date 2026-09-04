@@ -4,17 +4,24 @@ import type {
   AttachmentBytesInput,
   ChatMessage,
   ChatSession,
+  CreateProjectStandardSnapshotInput,
   CreateDraftSessionInput,
   InstallSkillDependenciesInput,
   MayiApi,
+  ManualStandardImport,
   MessageAttachment,
   PermissionResponseInput,
   PublicAppConfig,
+  ReviewStandardInput,
   RoleInfo,
   SendMessageInput,
   ServerEvent,
   SetSkillEnabledInput,
   SkillInfo,
+  StandardQueryInput,
+  StandardQueryResult,
+  StandardVersion,
+  ProjectStandardSnapshot,
   StartSessionInput
 } from '../shared/protocol'
 
@@ -71,6 +78,20 @@ const api: MayiApi = {
   roles: {
     /** 获取主进程校验后的内置角色列表。 */
     list: (): Promise<RoleInfo[]> => ipcRenderer.invoke('roles:list')
+  },
+  knowledge: {
+    importStandard: (input: ManualStandardImport): Promise<StandardVersion> =>
+      ipcRenderer.invoke('knowledge:import-standard', input),
+    reviewStandard: (input: ReviewStandardInput): Promise<StandardVersion> =>
+      ipcRenderer.invoke('knowledge:review-standard', input),
+    queryStandard: (input: StandardQueryInput): Promise<StandardQueryResult> =>
+      ipcRenderer.invoke('knowledge:query-standard', input),
+    createProjectSnapshot: (
+      input: CreateProjectStandardSnapshotInput
+    ): Promise<ProjectStandardSnapshot> =>
+      ipcRenderer.invoke('knowledge:create-project-snapshot', input),
+    latestProjectSnapshot: (sessionId: string): Promise<ProjectStandardSnapshot | undefined> =>
+      ipcRenderer.invoke('knowledge:latest-project-snapshot', sessionId)
   },
   attachments: {
     /** 打开原生文件选择器并返回已安全复制的附件。 */

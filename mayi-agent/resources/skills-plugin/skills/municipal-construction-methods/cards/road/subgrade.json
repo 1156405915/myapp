@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "municipal-road-subgrade-construction",
+  "version": "1.0.0",
+  "name": "市政道路路基施工",
+  "discipline": "road",
+  "tags": ["earthwork", "subgrade"],
+  "applicableFactIds": ["entity.road", "work.subgrade"],
+  "excludedFactIds": [],
+  "requiredFactIds": ["design.road-structure", "site.geology", "quantity.earthwork"],
+  "workflow": [
+    { "id": "W01", "name": "测量放样与清表" },
+    { "id": "W02", "name": "基底检查与处理" },
+    { "id": "W03", "name": "分层填筑或开挖整形" },
+    { "id": "W04", "name": "碾压与过程检测" },
+    { "id": "W05", "name": "验收与工序移交" }
+  ],
+  "controlPoints": [
+    { "id": "CP01", "name": "分层厚度", "sourceType": "design", "required": true },
+    { "id": "CP02", "name": "压实质量指标", "sourceType": "project", "required": true }
+  ],
+  "laborRoles": ["测量人员", "试验人员", "机械操作人员", "施工管理人员"],
+  "equipmentTypes": ["挖掘机", "推土机", "平地机", "压路机", "洒水设备"],
+  "qualityEvidence": ["测量记录", "基底验收记录", "压实检测报告", "隐蔽验收记录"],
+  "safetyRisks": ["机械交叉作业", "临边与边坡失稳", "地下管线扰动"],
+  "environmentalControls": ["湿法作业抑尘", "运输车辆覆盖", "施工排水有组织排放"],
+  "sourceRefs": [],
+  "prohibitedAssumptions": ["不得假设地基承载条件", "不得假设压实指标", "不得虚构土方平衡数量"],
+  "reviewStatus": "reviewed",
+  "reviewedAt": "2026-09-04"
+}

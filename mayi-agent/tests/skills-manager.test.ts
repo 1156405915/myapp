@@ -74,18 +74,20 @@ function createStore(
 }
 
 describe('SkillsManager', () => {
-  it('发现十四个内置技能并合并默认状态', () => {
+  it('发现十六个内置技能并合并默认状态', () => {
     const manager = new SkillsManager(createStore(), resolve('resources/skills-plugin'))
     const skills = manager.listSkills()
 
-    expect(skills).toHaveLength(14)
+    expect(skills).toHaveLength(19)
     expect(skills.map((skill) => skill.id)).toContain('document-summary')
     expect(skills.map((skill) => skill.id)).toContain('image-analysis')
     expect(skills.every((skill) => skill.source === 'builtin')).toBe(true)
     expect(skills.every((skill) => /[\u3400-\u9fff]/u.test(skill.description))).toBe(true)
     expect(skills.map((skill) => skill.id)).toContain('construction-organization-design')
     expect(skills.map((skill) => skill.id)).toContain('hefei-qingtian-precheck')
-    expect(manager.getEnabledSkillIds()).toHaveLength(14)
+    expect(skills.map((skill) => skill.id)).toContain('construction-intake')
+    expect(skills.map((skill) => skill.id)).toContain('construction-schedule-planning')
+    expect(manager.getEnabledSkillIds()).toHaveLength(19)
   })
 
   it('持久化开关并从下一次快照排除禁用技能', () => {
@@ -102,6 +104,9 @@ describe('SkillsManager', () => {
     const store = createStore({
       'hefei-qingtian-precheck': false,
       'construction-organization-design': false,
+      'construction-intake': false,
+      'construction-schedule-planning': false,
+      'document-comparison': false,
       'image-analysis': false
     })
     const manager = new SkillsManager(store, resolve('resources/skills-plugin'))
@@ -112,7 +117,10 @@ describe('SkillsManager', () => {
       expect.arrayContaining([
         'hefei-qingtian-precheck',
         'construction-organization-design',
+        'construction-intake',
+        'construction-schedule-planning',
         'bid-document-analysis',
+        'document-comparison',
         'information-extraction',
         'professional-writing',
         'document-review',
@@ -125,6 +133,9 @@ describe('SkillsManager', () => {
     expect(store.states).toEqual({
       'hefei-qingtian-precheck': false,
       'construction-organization-design': false,
+      'construction-intake': false,
+      'construction-schedule-planning': false,
+      'document-comparison': false,
       'image-analysis': false
     })
   })
@@ -157,7 +168,10 @@ describe('SkillsManager', () => {
     expect(manager.getEnabledSkillIds()).toEqual(
       expect.arrayContaining([
         'construction-organization-design',
+        'construction-intake',
+        'construction-schedule-planning',
         'bid-document-analysis',
+        'document-comparison',
         'information-extraction',
         'professional-writing',
         'document-review',

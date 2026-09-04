@@ -1,0 +1,17 @@
+{
+  "id": "construction-standard-registry",
+  "displayName": "工程标准登记",
+  "description": "按项目地区、专业和适用日期查询受控标准库，管理核验状态并生成不可变项目标准快照。",
+  "category": "construction",
+  "icon": "verified",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Mayi Internal",
+  "requires": {
+    "skills": [],
+    "commands": []
+  },
+  "references": []
+}

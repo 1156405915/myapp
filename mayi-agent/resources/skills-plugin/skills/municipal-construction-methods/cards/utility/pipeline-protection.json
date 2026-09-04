@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "municipal-utility-existing-pipeline-protection",
+  "version": "1.0.0",
+  "name": "既有地下管线保护施工",
+  "discipline": "utility",
+  "tags": ["existing-utility", "protection", "trial-pit"],
+  "applicableFactIds": ["risk.existing-utility"],
+  "excludedFactIds": [],
+  "requiredFactIds": ["site.utility-survey", "site.utility-owner-confirmation", "design.crossing-detail"],
+  "workflow": [
+    { "id": "W01", "name": "资料核对与产权单位联系" },
+    { "id": "W02", "name": "现场探测和人工试探" },
+    { "id": "W03", "name": "位置复核与保护方案确认" },
+    { "id": "W04", "name": "悬吊支撑或隔离保护" },
+    { "id": "W05", "name": "监测巡查与产权单位验收" }
+  ],
+  "controlPoints": [
+    { "id": "CP01", "name": "管线位置和权属", "sourceType": "project", "required": true },
+    { "id": "CP02", "name": "允许变形或保护要求", "sourceType": "design", "required": true }
+  ],
+  "laborRoles": ["管线协调人员", "测量人员", "监测人员", "安全管理人员"],
+  "equipmentTypes": ["管线探测设备", "测量设备", "监测设备", "小型开挖工具"],
+  "qualityEvidence": ["产权单位确认记录", "试探记录", "保护设施验收记录", "监测记录"],
+  "safetyRisks": ["误挖既有管线", "带压或带电设施破坏", "基坑局部失稳"],
+  "environmentalControls": ["人工试探土方及时覆盖", "泄漏应急物资就位"],
+  "sourceRefs": [],
+  "prohibitedAssumptions": ["不得仅依据旧图确定管线位置", "不得假设产权单位已同意保护方式"],
+  "reviewStatus": "reviewed",
+  "reviewedAt": "2026-09-04"
+}

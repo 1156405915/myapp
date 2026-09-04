@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "municipal-lighting-system-construction",
+  "version": "1.0.0",
+  "name": "道路照明系统施工",
+  "discipline": "lighting",
+  "tags": ["cable", "lamp-pole", "grounding"],
+  "applicableFactIds": ["entity.lighting"],
+  "excludedFactIds": [],
+  "requiredFactIds": ["design.lighting-layout", "design.cable-specification", "design.grounding"],
+  "workflow": [
+    { "id": "W01", "name": "点位和管线路由复核" },
+    { "id": "W02", "name": "沟槽、保护管和基础施工" },
+    { "id": "W03", "name": "电缆敷设和灯杆安装" },
+    { "id": "W04", "name": "接线、接地和绝缘测试" },
+    { "id": "W05", "name": "送电调试与照明验收" }
+  ],
+  "controlPoints": [
+    { "id": "CP01", "name": "电缆和保护管规格", "sourceType": "design", "required": true },
+    { "id": "CP02", "name": "接地与绝缘指标", "sourceType": "design", "required": true }
+  ],
+  "laborRoles": ["电工", "安装人员", "起重指挥人员", "调试人员"],
+  "equipmentTypes": ["起重设备", "电缆敷设工具", "绝缘测试设备", "接地测试设备"],
+  "qualityEvidence": ["隐蔽验收记录", "电缆测试记录", "接地测试记录", "送电调试记录"],
+  "safetyRisks": ["临时用电", "起重吊装", "高处作业", "送电误操作"],
+  "environmentalControls": ["电缆余料分类回收", "夜间照明调试防扰民"],
+  "sourceRefs": [],
+  "prohibitedAssumptions": ["不得假设供电接入条件", "不得假设灯杆基础参数", "不得假设接地指标"],
+  "reviewStatus": "reviewed",
+  "reviewedAt": "2026-09-04"
+}

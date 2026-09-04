@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "municipal-common-traffic-diversion",
+  "version": "1.0.0",
+  "name": "市政工程施工交通导改",
+  "discipline": "common",
+  "tags": ["traffic-diversion", "public-safety", "staging"],
+  "applicableFactIds": ["risk.live-traffic", "constraint.keep-access"],
+  "excludedFactIds": [],
+  "requiredFactIds": ["site.current-traffic", "tender.traffic-requirement", "authority.diversion-approval"],
+  "workflow": [
+    { "id": "W01", "name": "现状交通调查和需求确认" },
+    { "id": "W02", "name": "分阶段导改方案编制与审批" },
+    { "id": "W03", "name": "临时设施布设和切换前检查" },
+    { "id": "W04", "name": "交通切换、巡查和动态调整" },
+    { "id": "W05", "name": "阶段恢复和设施撤除" }
+  ],
+  "controlPoints": [
+    { "id": "CP01", "name": "导改阶段和通行能力", "sourceType": "project", "required": true },
+    { "id": "CP02", "name": "审批和占道条件", "sourceType": "project", "required": true }
+  ],
+  "laborRoles": ["交通组织负责人", "交通疏导人员", "安全巡查人员"],
+  "equipmentTypes": ["临时交通标志", "隔离设施", "警示照明", "应急车辆"],
+  "qualityEvidence": ["审批或协调记录", "切换前检查记录", "巡查记录", "恢复验收记录"],
+  "safetyRisks": ["社会车辆侵入", "行人通行冲突", "夜间视认不足", "应急通道受阻"],
+  "environmentalControls": ["减少怠速拥堵", "夜间施工噪声控制", "临时设施重复利用"],
+  "sourceRefs": [],
+  "prohibitedAssumptions": ["不得假设交通管理部门已批准", "不得虚构现状流量", "不得擅自降低应急通行条件"],
+  "reviewStatus": "reviewed",
+  "reviewedAt": "2026-09-04"
+}

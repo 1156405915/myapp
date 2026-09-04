@@ -1,0 +1,17 @@
+{
+  "id": "municipal-construction-methods",
+  "displayName": "市政专业工法",
+  "description": "根据项目事实确定性匹配道路、排水、管综、交通、照明、绿化和通用工法卡，并生成项目版本快照。",
+  "category": "construction",
+  "icon": "construction",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "recommended": true,
+  "source": "builtin",
+  "license": "Mayi Internal",
+  "requires": {
+    "skills": ["construction-standard-registry"],
+    "commands": []
+  },
+  "references": []
+}

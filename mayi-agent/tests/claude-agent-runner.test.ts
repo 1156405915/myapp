@@ -26,8 +26,67 @@ vi.mock('../src/main/logging/logger', () => ({
 }))
 
 import { ClaudeAgentRunner } from '../src/main/agent/claude-agent-runner'
+import type { DocumentPreparation } from '../src/main/documents/document-preprocessor'
 
 const temporaryDirectories: string[] = []
+
+describe('ClaudeAgentRunner 文档预处理', () => {
+  const session = { id: 'document-session', title: '文档', status: 'idle' as const,
+    cwd: process.cwd(), createdAt: 0, updatedAt: 0 }
+  const config = { apiKey: 'test-key', baseUrl: 'https://api.example.com/anthropic',
+    model: 'deepseek-v4-flash', cwd: process.cwd(), enabledSkillIds: ['pdf'],
+    skillsPluginPath: resolve('resources/skills-plugin') }
+
+  it('等待预处理完成后才调用模型并注入索引和进度', async () => {
+    let complete!: (value: string) => void
+    const prepare = vi.fn<DocumentPreparation['prepare']>((_session, _attachments, _signal, progress) => {
+      progress('正在 OCR 第 1 页')
+      return new Promise((done) => { complete = done })
+    })
+    queryMock.mockImplementation(() => (async function* () {
+      yield { type: 'result', subtype: 'success', session_id: 'runtime', result: '完成',
+        modelUsage: {}, usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0, duration_ms: 1 }
+    })())
+    const onActivity = vi.fn()
+    const run = new ClaudeAgentRunner(undefined, { prepare }).run(session, '分析', config,
+      { onActivity, onDelta: vi.fn(), onPermission: vi.fn() })
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(queryMock).not.toHaveBeenCalled()
+    complete('.mayi/documents/document-session/report.json')
+    await run
+    expect(queryMock).toHaveBeenCalledOnce()
+    expect(queryMock.mock.calls[0][0].prompt).toContain('.mayi/documents/document-session/report.json')
+    expect(onActivity).toHaveBeenCalledWith({ kind: 'thinking', label: '正在 OCR 第 1 页' })
+  })
+
+  it('即使附带图片，预处理失败也保留原始诊断且不调用模型', async () => {
+    const prepare = vi.fn().mockRejectedValue(new Error('缺少 OCR 依赖'))
+    const runner = new ClaudeAgentRunner(undefined, { prepare })
+    await expect(runner.run(session, '分析', config,
+      { onActivity: vi.fn(), onDelta: vi.fn(), onPermission: vi.fn() },
+      [{ id: 'image', name: '图片.png', kind: 'image', mimeType: 'image/png', size: 1,
+        relativePath: '.mayi/attachments/document-session/image.png' }])).rejects.toThrow('缺少 OCR 依赖')
+    expect(queryMock).not.toHaveBeenCalled()
+  })
+
+  it('取消预处理后不启动模型', async () => {
+    let complete!: (value: string) => void
+    let signal!: AbortSignal
+    const prepare: DocumentPreparation['prepare'] = (_session, _attachments, currentSignal) => {
+      signal = currentSignal
+      return new Promise((done) => { complete = done })
+    }
+    const runner = new ClaudeAgentRunner(undefined, { prepare })
+    const run = runner.run(session, '分析', config,
+      { onActivity: vi.fn(), onDelta: vi.fn(), onPermission: vi.fn() })
+    const rejected = expect(run).rejects.toThrow()
+    runner.cancel(session.id)
+    expect(signal.aborted).toBe(true)
+    complete('不应发送给模型')
+    await rejected
+    expect(queryMock).not.toHaveBeenCalled()
+  })
+})
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true })

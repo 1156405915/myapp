@@ -54,6 +54,11 @@
     ],
     "extraResources": [
       {
+        "from": "resources/document-processing",
+        "to": "document-processing",
+        "filter": ["*.py", "requirements.txt"]
+      },
+      {
         "from": "resources/skills-plugin",
         "to": "skills-plugin"
       },

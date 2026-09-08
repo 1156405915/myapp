@@ -23,20 +23,26 @@ const FILTER_FIELDS: Record<string, string[]> = {
 
 const READ_ONLY_FILE_TOOLS = new Set(['Read', 'Glob', 'Grep'])
 
+const COMMAND_PREFIX = String.raw`(?:^|[;&|]\s*|\r?\n\s*)(?:sudo\s+)?`
+
+function commandPattern(commandNames: string, suffix = String.raw`(?=\s|$)`): RegExp {
+  return new RegExp(`${COMMAND_PREFIX}(?:${commandNames})${suffix}`, 'i')
+}
+
 const HIGH_RISK_COMMANDS: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /\b(?:format|diskpart|bcdedit)\b/i, reason: '禁止执行磁盘或启动配置命令' },
-  { pattern: /\b(?:shutdown|restart-computer|stop-computer)\b/i, reason: '禁止执行关机或重启命令' },
+  { pattern: commandPattern('format|diskpart|bcdedit'), reason: '禁止执行磁盘或启动配置命令' },
+  { pattern: commandPattern('shutdown|restart-computer|stop-computer'), reason: '禁止执行关机或重启命令' },
   { pattern: /\brm\s+(?:-[^\r\n]*r[^\r\n]*f|-[^\r\n]*f[^\r\n]*r)\s+(?:\/|~|\$HOME)(?:\s|$)/i, reason: '禁止递归删除根目录或用户目录' },
   { pattern: /\bremove-item\b[^\r\n]*(?:-recurse[^\r\n]*-force|-force[^\r\n]*-recurse)/i, reason: '禁止强制递归删除' },
   { pattern: /\b(?:del|erase)\b[^\r\n]*\/s[^\r\n]*\/q/i, reason: '禁止静默递归删除' },
-  { pattern: /\b(?:mkfs|fdisk|parted|dd)\b/i, reason: '禁止修改磁盘分区或设备' },
-  { pattern: /\breg(?:\.exe)?\s+(?:add|delete)\s+HKLM\\/i, reason: '禁止修改系统级注册表' },
-  { pattern: /\bnet\s+user\b|\bnet\s+localgroup\b/i, reason: '禁止修改系统用户或用户组' },
-  { pattern: /\bsc(?:\.exe)?\s+(?:create|delete|config)\b/i, reason: '禁止修改系统服务' },
-  { pattern: /\bschtasks(?:\.exe)?\s+\/(?:create|delete|change)\b/i, reason: '禁止修改系统计划任务' },
-  { pattern: /\bset-executionpolicy\b/i, reason: '禁止修改 PowerShell 执行策略' },
-  { pattern: /\b(?:invoke-expression|iex|eval)\b/i, reason: '禁止执行动态拼接命令' },
-  { pattern: /\b(?:powershell|pwsh)\b[^\r\n]*(?:-enc|-encodedcommand)\b/i, reason: '禁止执行编码隐藏的 PowerShell 命令' },
+  { pattern: commandPattern('mkfs|fdisk|parted|dd'), reason: '禁止修改磁盘分区或设备' },
+  { pattern: commandPattern('reg(?:\\.exe)?', String.raw`\s+(?:add|delete)\s+HKLM\\`), reason: '禁止修改系统级注册表' },
+  { pattern: commandPattern('net', String.raw`\s+(?:user|localgroup)\b`), reason: '禁止修改系统用户或用户组' },
+  { pattern: commandPattern('sc(?:\\.exe)?', String.raw`\s+(?:create|delete|config)\b`), reason: '禁止修改系统服务' },
+  { pattern: commandPattern('schtasks(?:\\.exe)?', String.raw`\s+\/(?:create|delete|change)\b`), reason: '禁止修改系统计划任务' },
+  { pattern: commandPattern('set-executionpolicy'), reason: '禁止修改 PowerShell 执行策略' },
+  { pattern: commandPattern('invoke-expression|iex|eval'), reason: '禁止执行动态拼接命令' },
+  { pattern: commandPattern('powershell|pwsh', String.raw`[^\r\n]*(?:-enc|-encodedcommand)\b`), reason: '禁止执行编码隐藏的 PowerShell 命令' },
   { pattern: /\b(?:curl|wget|invoke-webrequest|iwr)\b[^|\r\n]*\|\s*(?:bash|sh|zsh|powershell|pwsh|iex)\b/i, reason: '禁止下载后直接执行远程脚本' },
   { pattern: /(?:^|[\s"'])\.\.(?:[\\/]|$)/, reason: '禁止命令通过父目录离开工作区' },
   { pattern: /(?:%USERPROFILE%|%HOMEDRIVE%|%WINDIR%|%SYSTEMROOT%|\$HOME\b|\$\{HOME\}|\$env:(?:USERPROFILE|WINDIR|SYSTEMROOT)\b|~[\\/])/i, reason: '禁止通过系统目录变量绕过工作区边界' },
@@ -177,18 +183,43 @@ function extractCommandPaths(command: string): string[] {
   return [...paths]
 }
 
+/** 移除 heredoc 正文，避免其中的程序源码被当作 Shell 命令。 */
+function stripHeredocBodies(command: string): string {
+  const lines = command.split(/\r?\n/)
+  const kept: string[] = []
+  let delimiter: string | undefined
+  for (const line of lines) {
+    if (delimiter) {
+      if (line.trim() === delimiter) delimiter = undefined
+      continue
+    }
+    kept.push(line)
+    const match = line.match(/<<-?\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))/)
+    delimiter = match?.[1] || match?.[2] || match?.[3]
+  }
+  return kept.join('\n')
+}
+
+/** 将 Git Bash 的 /d/path 转为 Windows 驱动器绝对路径。 */
+function normalizeCommandPath(value: string): string {
+  if (process.platform !== 'win32') return value
+  const match = value.match(/^\/([A-Za-z])(?:\/(.*))?$/)
+  return match ? `${match[1].toUpperCase()}:/${match[2] || ''}` : value
+}
+
 /** 对 Bash 命令执行高风险规则和可识别路径的工作区检查。 */
 export function validateBashCommand(workspacePath: string, command: unknown): SecurityValidation {
   if (typeof command !== 'string' || !command.trim() || command.length > 100_000 || command.includes('\0')) {
     return { allowed: false, reason: '终端命令无效', risk: 'high' }
   }
 
+  const shellCommands = stripHeredocBodies(command)
   for (const rule of HIGH_RISK_COMMANDS) {
-    if (rule.pattern.test(command)) return { allowed: false, reason: rule.reason, risk: 'high' }
+    if (rule.pattern.test(shellCommands)) return { allowed: false, reason: rule.reason, risk: 'high' }
   }
 
-  for (const commandPath of extractCommandPaths(command)) {
-    const validation = validateWorkspacePath(workspacePath, commandPath, true)
+  for (const commandPath of extractCommandPaths(shellCommands)) {
+    const validation = validateWorkspacePath(workspacePath, normalizeCommandPath(commandPath), true)
     if (!validation.allowed) return { ...validation, risk: 'high' }
   }
 

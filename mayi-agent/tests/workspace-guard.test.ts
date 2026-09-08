@@ -6,7 +6,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, parse, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   validateBashCommand,
@@ -151,6 +151,34 @@ describe('Bash 命令安全检查', () => {
     const workspace = createTemporaryRoot('mayi-workspace-')
     const outside = resolve(workspace, '..')
     expect(validateBashCommand(workspace, `cd "${outside}"`).allowed).toBe(false)
+  })
+
+  it('在 Windows 上接受工作区内的 Git Bash 驱动器路径', () => {
+    const workspace = createTemporaryRoot('mayi-workspace-')
+    const drive = parse(workspace).root.match(/^([A-Za-z]):[\\/]$/)?.[1]
+    if (!drive) return
+    const gitBashPath = `/${drive.toLowerCase()}${workspace.slice(2).replace(/\\/g, '/')}`
+    expect(validateBashCommand(workspace, `cd "${gitBashPath}" && pwd`)).toEqual({
+      allowed: true,
+      risk: 'medium'
+    })
+  })
+
+  it('不将 heredoc 中的 Python 变量名当作磁盘命令', () => {
+    const workspace = createTemporaryRoot('mayi-workspace-')
+    const command = `python - <<'PY'\nbase = r"D:\\project-test"\ndd = os.path.join(base, "reports")\nprint(dd)\nPY`
+    expect(validateBashCommand(workspace, command)).toEqual({ allowed: true, risk: 'medium' })
+  })
+
+  it.each([
+    'dd if=input.img of=output.img',
+    'echo ok && fdisk -l',
+    'sudo parted /dev/sda print'
+  ])('仍拒绝位于 Shell 命令位置的磁盘命令：%s', (command) => {
+    const workspace = createTemporaryRoot('mayi-workspace-')
+    const result = validateBashCommand(workspace, command)
+    expect(result.allowed).toBe(false)
+    expect(result.reason).toBe('禁止修改磁盘分区或设备')
   })
 
   it('允许在工作区内执行普通开发命令', () => {

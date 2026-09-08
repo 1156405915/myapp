@@ -17,6 +17,7 @@ import type {
   StartSessionInput
 } from '../shared/protocol'
 import { ClaudeAgentRunner } from './agent/claude-agent-runner'
+import { DocumentPreprocessor } from './documents/document-preprocessor'
 import { AttachmentManager } from './attachments/attachment-manager'
 import { SessionManager } from './session/session-manager'
 import { SkillsManager } from './skills/skills-manager'
@@ -337,7 +338,19 @@ if (!hasSingleInstanceLock) {
     knowledge.loadBuiltinMethodCards(
       join(skills.getPluginPath(), 'skills', 'municipal-construction-methods', 'cards')
     )
-    const runner = new ClaudeAgentRunner(knowledge)
+    const documentResources = app.isPackaged
+      ? join(process.resourcesPath, 'document-processing')
+      : join(app.getAppPath(), 'resources', 'document-processing')
+    const documents = new DocumentPreprocessor({
+      resourceDirectory: documentResources,
+      pythonCandidates: [
+        ...(process.env.MAYI_DOCUMENT_PYTHON ? [process.env.MAYI_DOCUMENT_PYTHON] : []),
+        ...(!app.isPackaged ? [join(app.getAppPath(), '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')] : []),
+        join(process.resourcesPath, 'python', process.platform === 'win32' ? 'python.exe' : 'bin/python3'),
+        ...(process.platform === 'win32' ? ['python.exe'] : ['python3', 'python'])
+      ]
+    })
+    const runner = new ClaudeAgentRunner(knowledge, documents)
     const roles = new RolesManager()
     const attachments = new AttachmentManager(store)
     /** 将会话管理器事件单向转发给可信渲染进程。 */

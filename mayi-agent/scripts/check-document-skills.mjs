@@ -8,8 +8,6 @@ const versionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
 const criticalFiles = [
   'skills/pdf/scripts/convert_pdf_to_images.py',
   'skills/docx/scripts/ooxml/scripts/validate.py',
-  'skills/pptx/html2pptx.tgz',
-  'skills/pptx/ooxml/scripts/validate.py',
   'skills/xlsx/recalc.py',
   'skills/construction-intake/scripts/inventory.mjs',
   'skills/construction-schedule-planning/scripts/calculate-schedule.mjs',

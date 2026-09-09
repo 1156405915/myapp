@@ -25,6 +25,7 @@ import { commandLabel } from './skills/command-dependencies'
 import { ConstructionKnowledgeService } from './knowledge/construction-knowledge-service'
 import { RolesManager } from './roles/roles-manager'
 import { AppStore } from './store/app-store'
+import { ProjectWorkflowService } from './workflow/project-workflow-service'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | null = null
@@ -119,7 +120,7 @@ const createWindow = (): BrowserWindow => {
 
 /** 确保特权 IPC 只能由唯一的可信主窗口调用。 */
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
-  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
+  if (!mainWindow || event.sender.id !== mainWindow.webContents.id || event.senderFrame !== mainWindow.webContents.mainFrame) {
     throw new Error('拒绝来自未知窗口的 IPC 请求')
   }
 }
@@ -133,6 +134,34 @@ function registerIpc(
   attachments: AttachmentManager,
   knowledge: ConstructionKnowledgeService
 ): void {
+  const projects = new ProjectWorkflowService(store, app.getPath('userData'))
+  const requireId = (value: unknown): string => {
+    if (typeof value !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value)) throw new Error('项目或成果 ID 无效')
+    return value
+  }
+  ipcMain.handle('projects:list', (event) => {
+    assertTrustedSender(event)
+    return projects.listProjects()
+  })
+  ipcMain.handle('projects:create', (event, name: unknown) => {
+    assertTrustedSender(event)
+    return projects.createProject(name)
+  })
+  ipcMain.handle('projects:runs', (event, projectId: unknown) => {
+    assertTrustedSender(event)
+    return projects.listRuns(requireId(projectId))
+  })
+  ipcMain.handle('projects:artifacts', (event, projectId: unknown) => {
+    assertTrustedSender(event)
+    return projects.listArtifacts(requireId(projectId))
+  })
+  ipcMain.handle('projects:open-artifact', async (event, projectId: unknown, artifactId: unknown) => {
+    assertTrustedSender(event)
+    const path = projects.resolveArtifact(requireId(projectId), requireId(artifactId))
+    if (!/\.(?:docx|pdf|xlsx)$/i.test(path)) throw new Error('不支持打开此成果类型')
+    const error = await shell.openPath(path)
+    if (error) throw new Error(error)
+  })
   /** 返回应用版本，不向渲染进程暴露 Electron 对象。 */
   ipcMain.handle('app:version', (event) => {
     assertTrustedSender(event)

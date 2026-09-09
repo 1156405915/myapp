@@ -102,7 +102,7 @@ describe('AppStore SQLite 持久化', () => {
     }
   })
 
-  it('将旧版 JSON 会话和纯文本消息事务迁移为结构化内容块', () => {
+  it('不导入旧版 JSON 会话、消息或配置', () => {
     const directory = createTemporaryDirectory()
     const now = Date.now()
     writeFileSync(
@@ -134,16 +134,15 @@ describe('AppStore SQLite 持久化', () => {
     )
 
     const store = new AppStore(directory)
-    expect(store.getPublicConfig().model).toBe('deepseek-v4-flash')
-    expect(store.listSessions()).toHaveLength(1)
-    expect(store.listMessages('legacy-session')[0].blocks).toEqual([
-      { type: 'text', text: '旧版文本' }
-    ])
+    expect(store.getPublicConfig().model).toBe('deepseek-v4-pro')
+    expect(store.listSessions()).toHaveLength(0)
+    expect(store.listMessages('legacy-session')).toEqual([])
     store.close()
 
     const files = readdirSync(directory)
-    expect(files.some((name) => name.startsWith('mayi-data.json.migrated-'))).toBe(true)
-    expect(files.some((name) => name.endsWith('.db.bak'))).toBe(true)
+    expect(files).toContain('mayi-data.json')
+    expect(files).toContain('mayi-projects-v1.db')
+    expect(files.some((name) => name.startsWith('mayi-data.json.migrated-'))).toBe(false)
   })
 
   it('恢复结构化 Trace、用量和耗时', () => {
@@ -263,7 +262,7 @@ describe('AppStore SQLite 持久化', () => {
     store.close()
   })
 
-  it('数据库损坏时从最近完整备份恢复', () => {
+  it('不会因同目录旧数据库损坏而恢复旧历史', () => {
     const directory = createTemporaryDirectory()
     const session: ChatSession = {
       id: 'recovery-session',
@@ -284,9 +283,53 @@ describe('AppStore SQLite 持久化', () => {
     const recovered = new AppStore(directory)
     try {
       expect(recovered.getSession(session.id)).toMatchObject({ id: session.id, title: session.title })
-      expect(readdirSync(directory).some((name) => name.includes('.corrupt-'))).toBe(true)
+      expect(readdirSync(directory).some((name) => name.includes('.corrupt-'))).toBe(false)
     } finally {
       recovered.close()
+    }
+  })
+
+  it('新数据库损坏时明确失败，不从旧备份恢复', () => {
+    const directory = createTemporaryDirectory()
+    writeFileSync(join(directory, 'mayi-projects-v1.db'), 'broken')
+    writeFileSync(join(directory, 'mayi-1.db.bak'), 'legacy')
+    expect(() => new AppStore(directory)).toThrow()
+  })
+
+  it('从零建立项目表并在重启后保留项目数据', () => {
+    const directory = createTemporaryDirectory()
+    const store = new AppStore(directory)
+    store.prepareInternal('INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?)').run('p1', '项目', 'workspaces/p1', 0, 1, 1)
+    const tables = store.prepareInternal("SELECT name FROM sqlite_schema WHERE type = 'table'").all().map((row) => row.name)
+    expect(tables).toEqual(expect.arrayContaining(['projects', 'documents', 'document_versions', 'document_chunks', 'workflow_runs', 'stage_runs', 'requirements', 'boq_items', 'construction_groups', 'sections', 'artifacts', 'workflow_events']))
+    store.close()
+    const reopened = new AppStore(directory)
+    try {
+      expect(reopened.prepareInternal('SELECT name FROM projects WHERE id = ?').get('p1')?.name).toBe('项目')
+    } finally {
+      reopened.close()
+    }
+  })
+
+  it('拒绝身份不匹配的旧 schema 而不修改其版本', () => {
+    const directory = createTemporaryDirectory()
+    const store = new AppStore(directory)
+    store.prepareInternal('PRAGMA application_id = 0').run()
+    store.close()
+    expect(() => new AppStore(directory)).toThrow('不导入旧数据')
+  })
+
+  it('外键拒绝跨项目绑定资料版本', () => {
+    const store = new AppStore(createTemporaryDirectory())
+    try {
+      for (const id of ['left', 'right']) {
+        store.prepareInternal('INSERT INTO projects VALUES (?, ?, ?, 0, 1, 1)').run(id, id, `workspaces/${id}`)
+        store.prepareInternal("INSERT INTO documents VALUES (?, ?, 'boq', NULL, 1)").run(`doc-${id}`, id)
+      }
+      expect(() => store.prepareInternal('INSERT INTO document_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run('v1', 'doc-left', 'right', '清单.xls', 'a'.repeat(64), 'sources/v1.xls', 'application/vnd.ms-excel', 1, 1)).toThrow('FOREIGN KEY')
+    } finally {
+      store.close()
     }
   })
 })

@@ -27,6 +27,13 @@ import type {
 
 // 这是渲染进程唯一可访问的主进程能力面，所有调用仍由主进程校验。
 const api: MayiApi = {
+  projects: {
+    list: () => ipcRenderer.invoke('projects:list'),
+    create: (name) => ipcRenderer.invoke('projects:create', name),
+    runs: (projectId) => ipcRenderer.invoke('projects:runs', projectId),
+    artifacts: (projectId) => ipcRenderer.invoke('projects:artifacts', projectId),
+    openArtifact: (projectId, artifactId) => ipcRenderer.invoke('projects:open-artifact', projectId, artifactId)
+  },
   /** 获取当前应用版本。 */
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   /** 请求主进程在隔离窗口中打开外部地址。 */

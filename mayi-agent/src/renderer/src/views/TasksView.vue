@@ -1,64 +1,80 @@
 <script setup lang="ts">
-import UiIcon from '@/components/UiIcon.vue'
+import { onMounted, ref } from 'vue'
+import type { ProjectSummary, WorkflowSummary } from '../../../shared/workflow'
 
-const stats = [
-  { icon: 'task', label: '全部任务', value: 12, hint: '所有任务总数', tone: 'green' },
-  { icon: 'clock', label: '进行中', value: 5, hint: '正在推进的任务', tone: 'blue' },
-  { icon: 'check', label: '已完成', value: 4, hint: '已完成的任务', tone: 'green' },
-  { icon: 'clock', label: '即将到期', value: 3, hint: '7天内到期任务', tone: 'orange' }
-]
+const projects = ref<ProjectSummary[]>([])
+const runs = ref<WorkflowSummary[]>([])
+const selected = ref('')
+const name = ref('')
+const error = ref('')
+const busy = ref(false)
+let request = 0
 
-const columns = [
-  {
-    title: '待处理',
-    color: 'gray',
-    tasks: [
-      ['对话框页面需求分析', '梳理对话框功能及核心需求，形成文档。', '10月28日', '高优先级'],
-      ['文件库结构优化设计', '优化文件库分类与权限结构，提升检索效率。', '11月02日', '中优先级'],
-      ['技能模块交互评审', '评审技能模块交互与信息架构。', '11月05日', '低优先级']
-    ]
-  },
-  {
-    title: '进行中',
-    color: 'blue',
-    tasks: [
-      ['MCP 接入方案设计', '设计 MCP 接入架构与认证流程。', '10月30日', '高优先级'],
-      ['任务看板功能实现', '完成任务看板前端开发与状态管理。', '11月04日', '中优先级'],
-      ['流程图生成模块开发', '支持多种图形样式与导出。', '11月06日', '中优先级']
-    ]
-  },
-  {
-    title: '已完成',
-    color: 'green',
-    tasks: [
-      ['网页检索功能实现', '支持结果摘要与引用。', '10月20日', '中优先级'],
-      ['文档总结能力优化', '提升准确性与可读性。', '10月18日', '中优先级'],
-      ['基础权限体系设计', '完成角色模型与权限边界。', '10月15日', '低优先级']
-    ]
+async function loadRuns(): Promise<void> {
+  const generation = ++request
+  runs.value = []
+  error.value = ''
+  const projectId = selected.value
+  if (!projectId) return
+  try {
+    const result = await window.mayi.projects.runs(projectId)
+    if (generation === request) runs.value = result
+  } catch (cause) {
+    if (generation === request) error.value = cause instanceof Error ? cause.message : String(cause)
   }
-]
+}
+
+async function refresh(): Promise<void> {
+  try {
+    projects.value = await window.mayi.projects.list()
+    if (!projects.value.some((p) => p.id === selected.value)) selected.value = projects.value[0]?.id || ''
+    await loadRuns()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
+
+async function create(): Promise<void> {
+  busy.value = true
+  error.value = ''
+  try {
+    const project = await window.mayi.projects.create(name.value)
+    selected.value = project.id
+    name.value = ''
+    await refresh()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    busy.value = false
+  }
+}
+onMounted(() => void refresh())
 </script>
 
 <template>
-  <section class="page dashboard-page">
-    <div class="metric-grid">
-      <article v-for="item in stats" :key="item.label" class="metric-card">
-        <span class="metric-icon" :class="item.tone"><UiIcon :name="item.icon" :size="28" /></span>
-        <div><strong>{{ item.label }}</strong><b>{{ item.value }}</b><small>{{ item.hint }}</small></div>
-      </article>
-    </div>
-
-    <div class="kanban">
-      <section v-for="column in columns" :key="column.title" class="kanban-column">
-        <header><span class="status-dot" :class="column.color"></span><strong>{{ column.title }}</strong><small>{{ column.tasks.length }}</small><UiIcon name="more" /></header>
-        <article v-for="task in column.tasks" :key="task[0]" class="task-card">
-          <strong>{{ task[0] }}</strong>
-          <p>{{ task[1] }}</p>
-          <footer><span><UiIcon name="clock" :size="14" />{{ task[2] }}</span><em>{{ task[3] }}</em><i>Z</i></footer>
-        </article>
-      </section>
-    </div>
-
-    <div class="quick-create"><UiIcon name="plus" /><span>创建新任务（按 Enter 快速创建）</span><button type="button"><UiIcon name="send" /></button></div>
+  <section class="page project-page">
+    <h1>施组项目</h1>
+    <p>招标要求 → 清单分类 → 方案编制 → 文档交付</p>
+    <form @submit.prevent="create">
+      <input v-model="name" maxlength="200" required aria-label="项目名称" placeholder="输入项目名称" />
+      <button type="submit" :disabled="busy">{{ busy ? '创建中…' : '创建项目' }}</button>
+    </form>
+    <p>工作区由应用自动创建。资料导入与阶段业务执行器尚未全部接通，当前不提供自动生成入口。</p>
+    <p v-if="error" role="alert">{{ error }}</p>
+    <label>当前项目 <select v-model="selected" @change="loadRuns"><option value="">请选择项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}</option></select></label>
+    <button type="button" @click="refresh">刷新</button>
+    <h2>真实运行记录</h2>
+    <p v-if="!runs.length">暂无运行记录</p>
+    <table v-else><thead><tr><th>运行</th><th>状态</th><th>模式</th><th>输入版本</th></tr></thead><tbody><tr v-for="run in runs" :key="run.id"><td>{{ run.id }}</td><td>{{ run.status }}</td><td>{{ run.mode }}</td><td>{{ run.inputRevision }}</td></tr></tbody></table>
   </section>
 </template>
+
+<style scoped>
+.project-page { padding: 32px; overflow: auto; }
+form { display: flex; gap: 12px; margin: 24px 0; }
+input, select, button { padding: 10px 14px; border: 1px solid #cbd5d1; border-radius: 6px; }
+p { margin: 16px 0; line-height: 1.6; }
+[role='alert'] { color: #b42318; }
+th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+h2 { margin-top: 24px; }
+</style>

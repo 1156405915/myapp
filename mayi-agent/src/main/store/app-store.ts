@@ -1,17 +1,9 @@
 import { app, safeStorage } from 'electron'
 import { createRequire } from 'node:module'
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  statSync,
-  unlinkSync
-} from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { logError, logInfo, logWarn } from '../logging/logger'
+import { logInfo, logWarn } from '../logging/logger'
+import { PROJECT_SCHEMA } from './project-schema'
 import { validateWorkspaceRoot } from '../security/workspace-guard'
 import type {
   AppConfigPatch,
@@ -25,19 +17,6 @@ import type {
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite')
 type DatabaseConnection = InstanceType<typeof DatabaseSync>
-
-interface LegacyStoredConfig {
-  baseUrl?: string
-  model?: string
-  cwd?: string
-  encryptedApiKey?: string
-}
-
-interface LegacyStoredData {
-  config?: LegacyStoredConfig
-  sessions?: ChatSession[]
-  messages?: Array<Omit<ChatMessage, 'blocks'> & { content?: string; blocks?: ContentBlock[] }>
-}
 
 interface SessionRow {
   id: string
@@ -84,7 +63,8 @@ interface AttachmentRow {
   created_at: number
 }
 
-const DATABASE_VERSION = 8
+const DATABASE_VERSION = 1
+const DATABASE_APPLICATION_ID = 0x4d415949
 const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
 const DEEPSEEK_MODELS = new Set(['deepseek-v4-pro', 'deepseek-v4-flash'])
 
@@ -110,59 +90,38 @@ function normalizeBaseUrl(value: string): string {
 export class AppStore {
   private readonly dataDirectory: string
   private readonly databasePath: string
-  private readonly legacyPath: string
   private database!: DatabaseConnection
   private transactionDepth = 0
   private closed = false
 
-  /** 打开数据库，完成完整性检查、版本迁移和旧版 JSON 导入。 */
+  // 新架构数据库不读取旧库、JSON 或历史备份。
   constructor(dataDirectory = app.getPath('userData')) {
     this.dataDirectory = dataDirectory
-    this.databasePath = join(dataDirectory, 'mayi.db')
-    this.legacyPath = join(dataDirectory, 'mayi-data.json')
+    this.databasePath = join(dataDirectory, 'mayi-projects-v1.db')
     mkdirSync(dataDirectory, { recursive: true })
-    this.database = this.openWithRecovery()
-    this.configureDatabase()
-    this.migrateDatabase()
-    this.importLegacyData()
-    this.ensureDefaultConfig()
-    this.recoverInterruptedSessions()
-    this.createBackup()
+    this.database = new DatabaseSync(this.databasePath)
+    try {
+      this.assertDatabaseIdentity()
+      this.configureDatabase()
+      this.initializeDatabase()
+      this.ensureDefaultConfig()
+      this.recoverInterruptedSessions()
+    } catch (error) {
+      this.database.close()
+      throw error
+    }
   }
 
-  /** 打开数据库并在文件损坏时优先从最近备份恢复。 */
-  private openWithRecovery(): DatabaseConnection {
-    let database: DatabaseConnection | undefined
-    try {
-      database = new DatabaseSync(this.databasePath)
-      const integrity = database.prepare('PRAGMA integrity_check').get() as
-        | { integrity_check?: string }
-        | undefined
-      if (integrity?.integrity_check !== 'ok') throw new Error('SQLite 完整性检查失败')
-      return database
-    } catch (error) {
-      database?.close()
-      logError('SQLite 数据库打开失败，正在执行恢复', error)
-      const corruptPath = `${this.databasePath}.corrupt-${Date.now()}`
-      try {
-        if (existsSync(this.databasePath)) renameSync(this.databasePath, corruptPath)
-        const backup = this.findLatestBackup()
-        if (backup) copyFileSync(backup, this.databasePath)
-        const recovered = new DatabaseSync(this.databasePath)
-        const integrity = recovered.prepare('PRAGMA integrity_check').get() as
-          | { integrity_check?: string }
-          | undefined
-        if (integrity?.integrity_check !== 'ok') throw new Error('备份数据库完整性检查失败')
-        logWarn(backup ? '已从 SQLite 备份恢复数据库' : '已创建新的 SQLite 数据库', {
-          backup,
-          corruptPath
-        })
-        return recovered
-      } catch (recoveryError) {
-        logError('SQLite 数据库恢复失败', recoveryError)
-        throw recoveryError
-      }
+  private assertDatabaseIdentity(): void {
+    const version = this.database.prepare('PRAGMA user_version').get() as { user_version: number }
+    const identity = this.database.prepare('PRAGMA application_id').get() as { application_id: number }
+    const tables = this.database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()
+    if (version.user_version === 0 && tables.length === 0 && identity.application_id === 0) return
+    if (version.user_version !== DATABASE_VERSION || identity.application_id !== DATABASE_APPLICATION_ID) {
+      throw new Error('项目数据库身份或版本不受支持；不导入旧数据')
     }
+    const check = this.database.prepare('PRAGMA quick_check').get() as { quick_check: string }
+    if (check.quick_check !== 'ok') throw new Error('项目数据库完整性检查失败')
   }
 
   /** 启用外键、WAL 和忙等待，降低异常退出与并发写入风险。 */
@@ -172,14 +131,13 @@ export class AppStore {
     )
   }
 
-  /** 按 user_version 顺序执行幂等迁移，并用事务保证原子性。 */
-  private migrateDatabase(): void {
+  private initializeDatabase(): void {
     const row = this.database.prepare('PRAGMA user_version').get() as { user_version: number }
-    if (row.user_version > DATABASE_VERSION) throw new Error('数据库版本高于当前应用支持版本')
+    if (row.user_version !== 0 && row.user_version !== DATABASE_VERSION) throw new Error('项目数据库版本不受支持')
     if (row.user_version === DATABASE_VERSION) return
 
     this.transaction(() => {
-      if (row.user_version < 1) {
+      this.database.exec(PROJECT_SCHEMA)
         this.database.exec(`
           CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -187,9 +145,11 @@ export class AppStore {
           );
           CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
+            project_id TEXT REFERENCES projects(id),
             title TEXT NOT NULL,
             status TEXT NOT NULL CHECK(status IN ('idle', 'running', 'error')),
             cwd TEXT NOT NULL,
+            role_id TEXT,
             runtime_session_id TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
@@ -229,20 +189,14 @@ export class AppStore {
           CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, created_at, id);
           CREATE INDEX IF NOT EXISTS idx_blocks_message_index ON content_blocks(message_id, block_index);
           CREATE INDEX IF NOT EXISTS idx_trace_message_index ON trace_steps(message_id, step_index);
-          PRAGMA user_version = 1;
         `)
-      }
-      if (row.user_version < 2) {
         this.database.exec(`
           CREATE TABLE IF NOT EXISTS skill_states (
             skill_id TEXT PRIMARY KEY,
             enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
             updated_at INTEGER NOT NULL
           );
-          PRAGMA user_version = 2;
         `)
-      }
-      if (row.user_version < 3) {
         this.database.exec(`
           CREATE TABLE IF NOT EXISTS attachments (
             id TEXT PRIMARY KEY,
@@ -260,16 +214,7 @@ export class AppStore {
           );
           CREATE INDEX IF NOT EXISTS idx_attachments_session_message
             ON attachments(session_id, message_id);
-          PRAGMA user_version = 3;
         `)
-      }
-      if (row.user_version < 4) {
-        this.database.exec(`
-          ALTER TABLE sessions ADD COLUMN role_id TEXT;
-          PRAGMA user_version = 4;
-        `)
-      }
-      if (row.user_version < 5) {
         this.database.exec(`
           CREATE TABLE IF NOT EXISTS standard_registry (
             id TEXT PRIMARY KEY,
@@ -340,6 +285,8 @@ export class AppStore {
             snapshot_json TEXT NOT NULL,
             snapshot_hash TEXT NOT NULL,
             artifact_relative_path TEXT NOT NULL,
+            artifact_state TEXT NOT NULL DEFAULT 'ready'
+              CHECK(artifact_state IN ('pending', 'ready', 'missing', 'hash_mismatch')),
             created_at INTEGER NOT NULL,
             UNIQUE(project_id, revision),
             UNIQUE(session_id, snapshot_hash)
@@ -362,10 +309,7 @@ export class AppStore {
             ON standard_queries(query_key, expires_at);
           CREATE INDEX IF NOT EXISTS idx_project_snapshot_session
             ON project_standard_snapshots(session_id, revision DESC);
-          PRAGMA user_version = 5;
         `)
-      }
-      if (row.user_version < 6) {
         this.database.exec(`
           CREATE TABLE IF NOT EXISTS method_cards (
             id TEXT PRIMARY KEY,
@@ -428,10 +372,7 @@ export class AppStore {
           CREATE INDEX IF NOT EXISTS idx_method_refs_code ON method_standard_refs(normalized_code);
           CREATE INDEX IF NOT EXISTS idx_project_method_snapshot_project
             ON project_method_snapshots(project_id, revision DESC);
-          PRAGMA user_version = 6;
         `)
-      }
-      if (row.user_version < 7) {
         this.database.exec(`
           CREATE TABLE IF NOT EXISTS official_sync_runs (
             id TEXT PRIMARY KEY,
@@ -499,14 +440,8 @@ export class AppStore {
             ON official_source_records(review_status, fetched_at DESC);
           CREATE INDEX IF NOT EXISTS idx_standard_clauses_number
             ON standard_clauses(document_id, clause_no);
-          PRAGMA user_version = 7;
         `)
-      }
-      if (row.user_version < 8) {
         this.database.exec(`
-          ALTER TABLE project_standard_snapshots
-            ADD COLUMN artifact_state TEXT NOT NULL DEFAULT 'ready'
-            CHECK(artifact_state IN ('pending', 'ready', 'missing', 'hash_mismatch'));
           CREATE TABLE IF NOT EXISTS standard_validation_runs (
             id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL,
@@ -574,46 +509,11 @@ export class AppStore {
           CREATE INDEX IF NOT EXISTS idx_validation_project ON standard_validation_runs(project_id, created_at DESC);
           CREATE INDEX IF NOT EXISTS idx_impacts_project_status ON knowledge_impacts(project_id, status, detected_at DESC);
           CREATE INDEX IF NOT EXISTS idx_retrieval_type_created ON knowledge_retrieval_events(query_type, created_at DESC);
-          PRAGMA user_version = 8;
+          PRAGMA user_version = 1;
         `)
-      }
+        this.database.exec(`PRAGMA application_id = ${DATABASE_APPLICATION_ID}`)
     })
-    logInfo('SQLite 数据库迁移完成', { version: DATABASE_VERSION })
-  }
-
-  /** 将旧版整体 JSON 在单个事务中导入，并保留原文件备份。 */
-  private importLegacyData(): void {
-    if (!existsSync(this.legacyPath) || this.getSetting('legacy_imported') === '1') return
-
-    try {
-      const parsed = JSON.parse(readFileSync(this.legacyPath, 'utf8')) as LegacyStoredData
-      this.transaction(() => {
-        if (parsed.config?.model && DEEPSEEK_MODELS.has(parsed.config.model)) {
-          this.setSetting('model', parsed.config.model)
-        }
-        if (parsed.config?.baseUrl) {
-          this.setSetting('base_url', normalizeBaseUrl(parsed.config.baseUrl))
-        }
-        if (parsed.config?.cwd) this.setSetting('cwd', resolve(parsed.config.cwd))
-        if (parsed.config?.encryptedApiKey) {
-          this.setSetting('encrypted_api_key', parsed.config.encryptedApiKey)
-        }
-
-        for (const session of parsed.sessions || []) this.saveSession(session)
-        for (const legacyMessage of parsed.messages || []) {
-          const blocks = legacyMessage.blocks?.length
-            ? legacyMessage.blocks
-            : [{ type: 'text', text: legacyMessage.content || '' } satisfies ContentBlock]
-          this.saveMessage({ ...legacyMessage, blocks })
-        }
-        this.setSetting('legacy_imported', '1')
-      })
-      renameSync(this.legacyPath, `${this.legacyPath}.migrated-${Date.now()}.bak`)
-      logInfo('旧版 JSON 数据已迁移到 SQLite')
-    } catch (error) {
-      logError('旧版 JSON 数据迁移失败', error)
-      throw error
-    }
+    logInfo('项目数据库初始化完成', { version: DATABASE_VERSION })
   }
 
   /** 确保首次启动拥有合法模型和默认工作目录。 */
@@ -622,42 +522,21 @@ export class AppStore {
     if (!DEEPSEEK_MODELS.has(this.getSetting('model') || '')) {
       this.setSetting('model', 'deepseek-v4-pro')
     }
-    if (!this.getSetting('cwd')) this.setSetting('cwd', app.getPath('documents'))
+    const workspace = join(this.dataDirectory, 'assistant-workspace')
+    mkdirSync(workspace, { recursive: true })
+    if (!this.getSetting('cwd')) this.setSetting('cwd', workspace)
   }
 
   /** 将异常退出时残留的运行态恢复为可再次执行的空闲态。 */
   private recoverInterruptedSessions(): void {
+    this.transaction(() => {
+      this.database.prepare("UPDATE stage_runs SET status = 'interrupted', updated_at = ? WHERE status IN ('pending','running','validating')").run(Date.now())
+      this.database.prepare("UPDATE workflow_runs SET status = 'interrupted', updated_at = ? WHERE status IN ('pending','running')").run(Date.now())
+    })
     const result = this.database
       .prepare("UPDATE sessions SET status = 'idle', updated_at = ? WHERE status = 'running'")
       .run(Date.now())
     if (result.changes > 0) logWarn('已恢复异常中断的会话状态', { count: result.changes })
-  }
-
-  /** 在数据库一致快照上创建轮换备份，最多保留三个。 */
-  private createBackup(): void {
-    if (!existsSync(this.databasePath) || statSync(this.databasePath).size === 0) return
-    const backupPath = join(this.dataDirectory, `mayi-${Date.now()}.db.bak`)
-    try {
-      const escapedPath = backupPath.replaceAll("'", "''")
-      this.database.exec(`VACUUM INTO '${escapedPath}'`)
-      const backups = this.listBackups()
-      for (const stale of backups.slice(3)) unlinkSync(stale)
-    } catch (error) {
-      logWarn('SQLite 备份创建失败', error)
-    }
-  }
-
-  /** 返回按修改时间从新到旧排列的数据库备份。 */
-  private listBackups(): string[] {
-    return readdirSync(this.dataDirectory)
-      .filter((name) => /^mayi-\d+\.db\.bak$/.test(name))
-      .map((name) => join(this.dataDirectory, name))
-      .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)
-  }
-
-  /** 查找最新可恢复备份。 */
-  private findLatestBackup(): string | undefined {
-    return this.listBackups()[0]
   }
 
   /** 用显式事务包装多表写入，并在异常时完整回滚。 */

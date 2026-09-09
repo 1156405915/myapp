@@ -1,3 +1,4 @@
+import type { ProjectSummary, WorkflowSummary, ArtifactSummary } from './workflow'
 import type {
   CreateProjectStandardSnapshotInput,
   ManualStandardImport,
@@ -194,6 +195,13 @@ export interface ReviewStandardInput {
 }
 
 export interface MayiApi {
+  projects: {
+    list(): Promise<ProjectSummary[]>
+    create(name: string): Promise<ProjectSummary>
+    runs(projectId: string): Promise<WorkflowSummary[]>
+    artifacts(projectId: string): Promise<ArtifactSummary[]>
+    openArtifact(projectId: string, artifactId: string): Promise<void>
+  }
   /** 获取应用版本。 */
   getVersion(): Promise<string>
   /** 在隔离窗口中打开外部地址。 */

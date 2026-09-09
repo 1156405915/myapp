@@ -5,7 +5,6 @@ import AntLogo from '@/components/AntLogo.vue'
 import PermissionDialog from '@/components/PermissionDialog.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import type { PermissionDecision } from '../../../shared/protocol'
-import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useUiStore } from '@/stores/ui'
 
@@ -17,7 +16,6 @@ interface NavigationItem {
 
 const route = useRoute()
 const router = useRouter()
-const auth = useAuthStore()
 const chat = useChatStore()
 const ui = useUiStore()
 const searchOpen = ref(false)
@@ -35,14 +33,12 @@ const settingsForm = reactive({
 })
 
 const navigation: NavigationItem[] = [
-  { label: '任务', icon: 'task', path: '/tasks' },
-  { label: 'MCP工具', icon: 'cube', path: '/mcp' },
+  { label: '施组项目', icon: 'task', path: '/tasks' },
   { label: '技能', icon: 'spark', path: '/skills' },
   { label: '文件库', icon: 'folder', path: '/files' }
 ]
 
-/** 返回当前登录用户或离线展示占位用户。 */
-const user = computed(() => auth.user ?? { name: 'zhangsan', email: 'zhangsan@ac.com', initials: 'Z' })
+const user = { name: '本地工作台', email: '施工组织设计', initials: '蚂' }
 /** 按标题筛选侧边栏会话，同时保留 store 的时间排序。 */
 const filteredSessions = computed(() => {
   const keyword = searchQuery.value.trim().toLocaleLowerCase()
@@ -124,12 +120,6 @@ async function respondToPermission(decision: PermissionDecision): Promise<void> 
   }
 }
 
-/** 清理本地登录态并返回登录页。 */
-function handleLogout(): void {
-  auth.logout()
-  ui.accountMenuOpen = false
-  void router.push('/login')
-}
 </script>
 
 <template>
@@ -213,9 +203,7 @@ function handleLogout(): void {
 
         <Transition name="account-pop">
           <div v-if="ui.accountMenuOpen && !ui.sidebarCollapsed" class="account-menu">
-            <button type="button"><UiIcon name="user" />个人资料</button>
             <button type="button" @click="openSettings"><UiIcon name="settings" />Agent 设置</button>
-            <button type="button" @click="handleLogout"><UiIcon name="logout" />退出登录</button>
           </div>
         </Transition>
       </div>

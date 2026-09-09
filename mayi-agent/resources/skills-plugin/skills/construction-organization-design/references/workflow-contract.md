@@ -1,12 +1,6 @@
 # 施组工作流数据契约
 
-开始撰写前应具备：
-
-- `project-facts.json`
-- `scoring-matrix.json`
-- `requirement-traceability.json`
-
-文件格式见 `bid-document-analysis/references/output-contract.md`。缺失文件时先调用对应技能生成，不在正文中临时维护第二套事实。
+开始撰写前由宿主提供已发布的要求、清单分类、证据及确认结果。下列 JSON 仅是计算器的数据格式，不是独立阶段状态或事实仓库。计算输入和输出必须关联当前运行及版本，缺少输入时报告问题，不自行创建旧工作流文件绕过验收。
 
 ## construction-plan.json
 
@@ -56,7 +50,7 @@
 
 任务可以直接提供 `durationDays`，也可以提供 `quantity`、`productivityPerCrewDay` 和 `crews`，由 `construction-schedule-planning` 按 `ceil(quantity / (productivityPerCrewDay × crews))` 推算并记录依据。前置关系支持 FS、SS、FF、SF 和 `lagDays`。
 
-`project` 中的字段必须来自 `project-facts.json`。WBS、横道图、网络图、劳动力和机械计划从本文件生成，不得分别手填互相独立的数据。`project.durationDays` 是目标工期，`schedule.calculatedDurationDays` 是逻辑网络计算值，不得相互覆盖。
+`project` 中的字段必须来自宿主提供的有效要求和已确认项目数据。WBS、横道图、网络图、劳动力和机械计划从已发布计划生成，不得分别手填互相独立的数据。`project.durationDays` 是目标工期，`schedule.calculatedDurationDays` 是逻辑网络计算值，不得相互覆盖。
 
 ## consistency-ledger.json
 

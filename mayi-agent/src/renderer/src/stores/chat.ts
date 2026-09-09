@@ -51,8 +51,7 @@ export const useChatStore = defineStore('chat', () => {
         sessions.value = storedSessions
         config.value = storedConfig
         roles.value = availableRoles
-        selectedRoleId.value = availableRoles[0]?.id || null
-        if (storedSessions[0]) await selectSession(storedSessions[0].id)
+        selectedRoleId.value = null
         initialized.value = true
       } catch (reason) {
         setError(reason)
@@ -66,7 +65,7 @@ export const useChatStore = defineStore('chat', () => {
   /** 切换活动会话并加载其持久化消息。 */
   async function selectSession(sessionId: string): Promise<void> {
     activeSessionId.value = sessionId
-    selectedRoleId.value = sessions.value.find((session) => session.id === sessionId)?.roleId || roles.value[0]?.id || null
+    selectedRoleId.value = sessions.value.find((session) => session.id === sessionId)?.roleId ?? null
     streamingContent.value = ''
     activity.value = null
     error.value = ''
@@ -133,12 +132,13 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent.value = ''
     activity.value = null
     error.value = ''
-    selectedRoleId.value = roles.value[0]?.id || null
+    selectedRoleId.value = null
   }
 
   /** 选择尚未创建会话所使用的角色。 */
-  function selectRole(roleId: string): void {
-    if (!roles.value.some((role) => role.id === roleId)) return
+  function selectRole(roleId: string | null): void {
+    if (activeSessionId.value) return
+    if (roleId !== null && !roles.value.some((role) => role.id === roleId)) return
     selectedRoleId.value = roleId
   }
 

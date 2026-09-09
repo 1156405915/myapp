@@ -19,7 +19,6 @@ describe('RolesManager', () => {
         icon: 'task',
         requiredSkillIds: [
           'construction-organization-design',
-          'hefei-qingtian-precheck',
           'image-analysis'
         ]
       }
@@ -31,7 +30,8 @@ describe('RolesManager', () => {
     const manager = new RolesManager(resolve('resources/roles'))
 
     expect(manager.getRole('construction-organization-expert')?.prompt).toContain('施组编制专家')
-    expect(manager.getRole('construction-organization-expert')?.prompt).toContain('八阶段工作流')
+    expect(manager.getRole('construction-organization-expert')?.prompt).toContain('四阶段工作流')
+    expect(manager.getRole('construction-organization-expert')?.prompt).not.toContain('八阶段工作流')
     expect(() => manager.getRole('unknown-role')).toThrow('角色不存在')
     expect(() => manager.getRole('../role')).toThrow('角色 ID 无效')
   })

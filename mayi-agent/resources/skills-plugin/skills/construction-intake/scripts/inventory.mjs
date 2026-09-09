@@ -16,14 +16,15 @@ import {
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const STAGES = ['00', '01', '02', '03', '04', '05', '06', '07', '08']
+const STAGES = ['requirements', 'boq', 'draft', 'deliver']
 const DEFAULT_MAX_FILES = 50_000
 const DEFAULT_MAX_DEPTH = 40
 
 const CATEGORY_RULES = [
   ['clarification', /补疑|答疑|澄清|变更公告|更正公告|补充通知|修改通知/u],
   ['tender', /招标文件|采购文件|投标人须知|评标办法|技术标准和要求|发包文件/u],
-  ['bill-of-quantities', /工程量清单|招标清单|最高投标限价|控制价|扬尘污染防治费|价差|主要材料|计价/u],
+  ['cost-reference', /最高投标限价|控制价/u],
+  ['bill-of-quantities', /工程量清单|招标清单|扬尘污染防治费|价差|主要材料|计价/u],
   ['survey-and-utilities', /地勘|勘察|地质|测量|物探|管线探测|地下管线|勘探点|水文/u],
   ['contract', /合同|专用条款|通用条款|协议书|履约/u],
   ['management-requirements', /管理制度|管理规定|管理办法|封样|第三方巡查|关键工艺/u],
@@ -37,7 +38,8 @@ const CATEGORY_LABELS = {
   tender: '招标主文件',
   clarification: '补疑、答疑和变更',
   drawing: '图纸及设计说明',
-  'bill-of-quantities': '清单及控制价',
+  'bill-of-quantities': '招标工程量清单',
+  'cost-reference': '控制价参考资料',
   'survey-and-utilities': '地勘、测量及管线',
   contract: '合同条件',
   'management-requirements': '建设单位管理要求',
@@ -52,6 +54,7 @@ const SOURCE_PRIORITIES = {
   tender: 90,
   drawing: 80,
   'bill-of-quantities': 70,
+  'cost-reference': 20,
   contract: 60,
   'management-requirements': 50,
   'survey-and-utilities': 50,
@@ -187,11 +190,11 @@ function normalizeVersionKey(relativePath) {
 }
 
 function affectedStagesForCategories(categories) {
-  let earliest = 8
+  let earliest = 3
   for (const category of categories) {
-    if (['tender', 'clarification', 'contract', 'management-requirements'].includes(category)) earliest = Math.min(earliest, 1)
-    else if (['drawing', 'bill-of-quantities', 'survey-and-utilities', 'site-survey', 'bidder-resources'].includes(category)) earliest = Math.min(earliest, 2)
-    else if (category === 'reference') earliest = Math.min(earliest, 3)
+    if (['tender', 'clarification', 'contract', 'management-requirements'].includes(category)) earliest = 0
+    else if (category === 'bill-of-quantities') earliest = Math.min(earliest, 1)
+    else if (['drawing', 'survey-and-utilities', 'site-survey', 'bidder-resources', 'reference', 'cost-reference'].includes(category)) earliest = Math.min(earliest, 2)
     else earliest = Math.min(earliest, 0)
   }
   return STAGES.slice(earliest)
@@ -234,23 +237,6 @@ function compareInventories(previous, currentFiles) {
   }
 }
 
-function updateTaskState(taskStatePath, fingerprint, changeSummary) {
-  if (!taskStatePath) return
-  const state = existsSync(taskStatePath)
-    ? JSON.parse(readFileSync(taskStatePath, 'utf8'))
-    : { schemaVersion: 1, stages: {} }
-  state.inputFingerprint = fingerprint
-  state.updatedAt = new Date().toISOString()
-  state.stages ||= {}
-  for (const stageId of changeSummary.affectedStages) {
-    const stage = state.stages[stageId]
-    if (stage?.status === 'completed') {
-      state.stages[stageId] = { ...stage, status: 'stale', staleAt: state.updatedAt }
-    }
-  }
-  writeJsonAtomic(taskStatePath, state)
-}
-
 function buildGroups(files) {
   const hashes = new Map()
   const versions = new Map()
@@ -285,15 +271,15 @@ function buildCompleteness(files, issues) {
   const checks = [
     { id: 'tender-main', label: '招标主文件', present: counts.tender > 0 },
     { id: 'clarifications', label: '补疑、答疑或变更资料', present: counts.clarification > 0, optional: true },
-    { id: 'drawings', label: '图纸或设计说明', present: counts.drawing > 0 },
-    { id: 'bill-of-quantities', label: '工程量清单或控制价', present: counts['bill-of-quantities'] > 0 }
+    { id: 'drawings', label: '图纸或设计说明', present: counts.drawing > 0, optional: true },
+    { id: 'bill-of-quantities', label: '招标工程量清单', present: counts['bill-of-quantities'] > 0 }
   ]
   const blockingIssues = issues.filter((issue) => issue.severity === 'blocking')
   const missingRequired = checks.filter((check) => !check.optional && !check.present)
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
-    gate: 'G0',
+    scope: 'source-inventory',
     ready: blockingIssues.length === 0 && missingRequired.length === 0,
     status: blockingIssues.length ? 'blocked' : missingRequired.length ? 'incomplete' : 'ready',
     categoryCounts: counts,
@@ -314,8 +300,6 @@ export async function createInventory(options) {
   if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > 100) throw new Error('maxDepth 无效')
   if (normalizePathForComparison(inputRoot) === normalizePathForComparison(outputRoot)) throw new Error('输出目录不能等于输入目录')
 
-  const taskStatePath = options.taskState ? resolve(options.taskState) : undefined
-  if (taskStatePath && !isWithin(dirname(outputRoot), taskStatePath)) throw new Error('task-state 必须位于 construction-plan 输出目录内')
   const generatedFilesRoot = isWithin(inputRoot, outputRoot) ? dirname(outputRoot) : outputRoot
 
   const files = []
@@ -467,7 +451,6 @@ export async function createInventory(options) {
   writeJsonAtomic(resolve(outputRoot, 'unreadable-files.json'), unreadableFiles)
   writeJsonAtomic(resolve(outputRoot, 'completeness-report.json'), completeness)
   writeJsonAtomic(resolve(outputRoot, 'change-summary.json'), changeReport)
-  updateTaskState(taskStatePath, fingerprint, changeReport)
   return { inventory, sourceRegister, unreadableFiles, completeness, changeSummary: changeReport }
 }
 
@@ -478,7 +461,6 @@ async function main() {
       input: args.input,
       output: args.output,
       previous: args.previous,
-      taskState: args['task-state'],
       maxFiles: args['max-files'],
       maxDepth: args['max-depth']
     })

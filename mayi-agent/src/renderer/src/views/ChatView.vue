@@ -234,16 +234,27 @@ function contextPercentage(item: ChatMessage): number {
     <div v-if="chat.messages.length === 0 && !chat.streamingContent" class="chat-empty">
       <div class="welcome-copy">
         <h1>今天想完成什么？</h1>
-        <p>选择专业角色，上传项目资料后直接描述需要完成的工作。</p>
+        <p>直接描述问题或上传附件，助手会按需选择可用的工具和技能。</p>
       </div>
-      <div class="role-heading">选择角色</div>
+      <div class="role-heading">普通聊天，也可按需选择专业角色</div>
       <div class="role-shortcuts">
+        <button
+          type="button"
+          :class="{ selected: chat.selectedRoleId === null }"
+          :aria-pressed="chat.selectedRoleId === null"
+          :disabled="!!chat.activeSessionId"
+          @click="chat.selectRole(null)"
+        >
+          <span><strong>普通聊天</strong><small>不绑定专业角色，按问题选择工具和技能</small></span>
+          <em v-if="chat.selectedRoleId === null">已选择</em>
+        </button>
         <button
           v-for="role in chat.roles"
           :key="role.id"
           type="button"
           :class="{ selected: chat.selectedRoleId === role.id }"
           :aria-pressed="chat.selectedRoleId === role.id"
+          :disabled="!!chat.activeSessionId"
           @click="chat.selectRole(role.id)"
         >
           <UiIcon :name="role.icon" :size="34" />

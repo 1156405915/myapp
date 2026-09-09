@@ -12,4 +12,4 @@ description: Summarize one or more documents into accurate Chinese executive sum
 5. 保留关键数字、日期、主体、范围、条件、例外和结论，并标注可定位的章节、页码或工作表来源。
 6. 多文件任务先分别总结，再说明共同点、差异和冲突。
 7. 按 [references/output-format.md](references/output-format.md) 组织结果；用户指定格式时优先服从用户要求。
-8. 用户要求生成正式文件时，将确认后的内容交给 `docx`、`pptx`、`xlsx` 或 `pdf` Skill 完成排版和质量检查。
+8. 用户要求文件时，向宿主文档构建工具提交已确认内容；DOCX、XLSX 或 PDF 必须经过真实检查和成果登记，不凭回复宣布正式交付。

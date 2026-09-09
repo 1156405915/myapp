@@ -74,11 +74,13 @@ function createStore(
 }
 
 describe('SkillsManager', () => {
-  it('发现十六个内置技能并合并默认状态', () => {
+  it('仅发现保留的施组及文档基础技能', () => {
     const manager = new SkillsManager(createStore(), resolve('resources/skills-plugin'))
     const skills = manager.listSkills()
 
-    expect(skills).toHaveLength(19)
+    expect(skills).toHaveLength(17)
+    expect(skills.map((skill) => skill.id)).not.toContain('pptx')
+    expect(skills.map((skill) => skill.id)).not.toContain('research-synthesis')
     expect(skills.map((skill) => skill.id)).toContain('document-summary')
     expect(skills.map((skill) => skill.id)).toContain('image-analysis')
     expect(skills.every((skill) => skill.source === 'builtin')).toBe(true)
@@ -87,17 +89,17 @@ describe('SkillsManager', () => {
     expect(skills.map((skill) => skill.id)).toContain('hefei-qingtian-precheck')
     expect(skills.map((skill) => skill.id)).toContain('construction-intake')
     expect(skills.map((skill) => skill.id)).toContain('construction-schedule-planning')
-    expect(manager.getEnabledSkillIds()).toHaveLength(19)
+    expect(manager.getEnabledSkillIds()).toHaveLength(17)
   })
 
   it('持久化开关并从下一次快照排除禁用技能', () => {
     const store = createStore()
     const manager = new SkillsManager(store, resolve('resources/skills-plugin'))
 
-    const updated = manager.setEnabled('pptx', false)
-    expect(updated.find((skill) => skill.id === 'pptx')?.enabled).toBe(false)
-    expect(manager.getEnabledSkillIds()).not.toContain('pptx')
-    expect(store.states.pptx).toBe(false)
+    const updated = manager.setEnabled('document-summary', false)
+    expect(updated.find((skill) => skill.id === 'document-summary')?.enabled).toBe(false)
+    expect(manager.getEnabledSkillIds()).not.toContain('document-summary')
+    expect(store.states['document-summary']).toBe(false)
   })
 
   it('为角色展开完整技能依赖且不修改全局开关', () => {

@@ -8,14 +8,10 @@ description: Deterministically calculate and validate construction WBS schedules
 ## 执行顺序
 
 1. 读取施工范围、工程量、工期目标和工作面约束，先形成符合 [references/plan-contract.md](references/plan-contract.md) 的 `construction-plan.json`。
-2. 不得凭文字判断关键线路。运行 [scripts/calculate-schedule.mjs](scripts/calculate-schedule.mjs) 完成关系校验、CPM 和资源计算。
-3. 将报告写入 `04-planning/schedule-calculation.json`，将补充计算字段后的计划写入新文件；校验通过后再替换权威计划，不覆盖未经备份的输入文件。
-4. 存在环路、未知前置任务、无效工期或计算工期超过招标目标时停止 G4，并进入冲突或存疑确认。
+2. 不得凭文字判断关键线路。由宿主的受控计算工具调用 [scripts/calculate-schedule.mjs](scripts/calculate-schedule.mjs)，不通过 Bash 执行资源脚本；工具未提供时明确受阻。
+3. 计算输出属于本次 draft 阶段尝试，由主进程验证后发布为新计划版本，不覆盖输入或已发布文件。
+4. 存在环路、未知前置任务、无效工期或计算工期超过招标目标时返回问题，由主进程暂停方案阶段并集中确认。
 5. 使用计算结果生成横道图、网络图、劳动力曲线和机械材料计划，不在图表中重新手填数据。
-
-```powershell
-node scripts/calculate-schedule.mjs --plan <construction-plan.json> --output <schedule-calculation.json> --enriched-plan <construction-plan.calculated.json>
-```
 
 ## 计算边界
 

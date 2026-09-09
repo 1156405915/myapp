@@ -19,9 +19,8 @@ function writePdf(path: string, content = 'test'): void {
   writeFileSync(path, `%PDF-1.4\n${content}\n%%EOF`, 'utf8')
 }
 
-function runInventory(input: string, output: string, taskState?: string) {
+function runInventory(input: string, output: string) {
   const args = [scriptPath, '--input', input, '--output', output]
-  if (taskState) args.push('--task-state', taskState)
   return spawnSync(process.execPath, args, { encoding: 'utf8' })
 }
 
@@ -79,7 +78,7 @@ describe('construction-intake inventory', () => {
     }
   })
 
-  it('识别输入变化并将受影响的完成阶段标记为 stale', async () => {
+  it('报告四阶段输入影响但不改写旧任务状态', async () => {
     const root = createTemporaryDirectory()
     const planRoot = join(root, '.mayi', 'tasks', 'session', 'construction-plan')
     const output = join(planRoot, '00-intake')
@@ -98,13 +97,13 @@ describe('construction-intake inventory', () => {
     )
     writePdf(join(root, '招标文件正文.pdf'), 'v2')
 
-    expect(runInventory(root, output, taskState).status).toBe(0)
+    expect(runInventory(root, output).status).toBe(0)
     const changeSummary = JSON.parse(readFileSync(join(output, 'change-summary.json'), 'utf8'))
     const state = JSON.parse(readFileSync(taskState, 'utf8'))
 
     expect(changeSummary.modified).toEqual(['招标文件正文.pdf'])
-    expect(changeSummary.affectedStages).toEqual(['01', '02', '03', '04', '05', '06', '07', '08'])
-    expect(state.stages['01'].status).toBe('stale')
-    expect(state.stages['04'].status).toBe('stale')
+    expect(changeSummary.affectedStages).toEqual(['requirements', 'boq', 'draft', 'deliver'])
+    expect(state.stages['01'].status).toBe('completed')
+    expect(state.stages['04'].status).toBe('completed')
   })
 })
